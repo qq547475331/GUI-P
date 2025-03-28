@@ -1,0 +1,69 @@
+.private-registry-page {
+  margin: 20px;
+}
+
+.private-registry-page .steps-content {
+  margin-top: 20px;
+  padding: 20px;
+  background-color: #fafafa;
+  border: 1px dashed #e9e9e9;
+  border-radius: 2px;
+  min-height: 300px;
+}
+
+.private-registry-page .steps-action {
+  margin-top: 24px;
+}
+
+.private-registry-page .step-content {
+  margin-bottom: 20px;
+}
+
+.private-registry-page .step-subtitle {
+  font-weight: bold;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.private-registry-page .required {
+  color: #ff4d4f;
+}
+
+.private-registry-page .registry-message {
+  margin-top: 20px;
+  padding: 10px;
+  background-color: #e6f7ff;
+  border: 1px solid #91d5ff;
+  border-radius: 2px;
+  color: #1890ff;
+}
+
+/* 额外样式确保表单项与设计一致 */
+.private-registry-page .ant-form-item {
+  margin-bottom: 24px;
+}
+
+.private-registry-page .ant-input {
+  height: 40px;
+}
+
+.private-registry-page .ant-select {
+  width: 100%;
+}
+
+.private-registry-page .ant-select-selector {
+  height: 40px;
+}
+
+.private-registry-page .ant-select-selection-item {
+  line-height: 38px;
+}
+
+.private-registry-page .ant-card-head-title {
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.private-registry-page .ant-steps {
+  margin-bottom: 30px;
+} 

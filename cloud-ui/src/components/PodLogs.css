@@ -1,0 +1,49 @@
+.log-container {
+  background-color: #1e1e1e;
+  color: #f0f0f0;
+  font-family: 'Courier New', Courier, monospace;
+  padding: 10px;
+  height: 500px;
+  overflow-y: auto;
+  border-radius: 4px;
+  position: relative;
+}
+
+.logs {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.no-logs {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  color: #888;
+  font-style: italic;
+}
+
+.loading-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1;
+}
+
+.stream-indicator {
+  background-color: #177ddc;
+  color: white;
+  padding: 5px 10px;
+  border-radius: 4px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+} 

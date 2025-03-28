@@ -1,0 +1,24 @@
+.container-config {
+  margin-bottom: 20px;
+}
+
+.container-config-card {
+  border-radius: 4px;
+}
+
+.container-config .ant-divider {
+  margin: 16px 0;
+}
+
+.container-config .ant-select {
+  width: 100%;
+}
+
+.container-config .image-tag {
+  margin-bottom: 2px;
+  margin-right: 4px;
+}
+
+.container-config .add-tag-button {
+  margin-top: 8px;
+} 

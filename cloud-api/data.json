@@ -1,0 +1,38 @@
+{
+  "applications": [],
+  "imageRegistries": [
+    {
+      "createdAt": "0001-01-01T00:00:00Z",
+      "id": "d3c398ec-a990-4013-854e-0af08b911ef3",
+      "name": "test",
+      "password": "12345",
+      "type": "harbor",
+      "url": "http://192.168.0.140:881",
+      "username": "admin"
+    }
+  ],
+  "kubeConfigs": [],
+  "registries": [
+    {
+      "id": "docker-hub",
+      "name": "Docker Hub",
+      "type": "docker",
+      "url": "https://registry.hub.docker.com",
+      "description": "Docker Hub公共镜像仓库",
+      "isPublic": true,
+      "createdAt": "2025-03-26T03:40:26.056443+08:00",
+      "updatedAt": "2025-03-26T03:40:26.056443+08:00"
+    },
+    {
+      "id": "01a9e0c7-629f-4c8d-b695-884ea87f97c7",
+      "name": "test",
+      "type": "harbor",
+      "url": "http://192.168.0.140:881",
+      "username": "admin",
+      "password": "12345",
+      "isPublic": false,
+      "createdAt": "2025-03-26T03:41:28.096251+08:00",
+      "updatedAt": "2025-03-26T03:41:28.09672+08:00"
+    }
+  ]
+}

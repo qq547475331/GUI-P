@@ -1,0 +1,21 @@
+.network-config {
+  padding: 20px;
+  background-color: #fff;
+}
+
+.section-header {
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+}
+
+.section-header h2 {
+  font-size: 16px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.add-port-btn {
+  border-radius: 2px;
+  border-style: dashed;
+} 

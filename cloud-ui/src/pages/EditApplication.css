@@ -1,0 +1,25 @@
+.edit-application {
+  width: 100%;
+}
+
+.steps {
+  margin-bottom: 40px;
+}
+
+.steps-content {
+  min-height: 400px;
+  margin-bottom: 40px;
+}
+
+.steps-action {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 500px;
+} 

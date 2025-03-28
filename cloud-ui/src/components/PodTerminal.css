@@ -1,0 +1,28 @@
+.terminal-container {
+  background-color: #1e1e1e;
+  color: #f0f0f0;
+  font-family: 'Courier New', Courier, monospace;
+  padding: 10px;
+  height: 400px;
+  overflow-y: auto;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.terminal-container:focus {
+  outline: none;
+  border: 1px solid #177ddc;
+}
+
+.common-commands {
+  margin-bottom: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.common-commands button {
+  margin-right: 8px;
+  margin-bottom: 8px;
+} 

@@ -1,0 +1,103 @@
+.k8s-resources-page {
+  width: 100%;
+  margin: 20px;
+}
+
+.k8s-resources-page .resource-name {
+  font-weight: 600;
+  color: #1890ff;
+}
+
+.k8s-resources-page .ant-table-row:hover .resource-name {
+  color: #096dd9;
+}
+
+.k8s-resources-page .ant-tabs-nav {
+  margin-bottom: 16px;
+}
+
+.k8s-resources-page .loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 300px;
+}
+
+.k8s-resources-page .ant-card {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.k8s-resources-page .ant-table {
+  background-color: #fff;
+}
+
+.k8s-resources-page .ant-tag {
+  margin: 2px;
+}
+
+.k8s-resources-page .ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
+  padding: 6px 16px;
+}
+
+.k8s-resources-page .ant-tabs-tab .ant-badge {
+  margin-left: 5px;
+}
+
+.k8s-resources-page .ant-table-cell {
+  padding: 12px 8px;
+}
+
+.k8s-resources-page .ant-table-thead > tr > th {
+  background: #f5f7fa;
+  font-weight: 600;
+}
+
+.k8s-resources-page .ant-badge-status-text {
+  margin-left: 6px;
+}
+
+.k8s-resources-page .ant-btn-text {
+  padding: 0 8px;
+}
+
+.k8s-resources-page .ant-space-compact {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.k8s-resources-page .ant-table-pagination {
+  margin: 16px 0;
+}
+
+/* 资源状态标签样式 */
+.k8s-resources-page .status-success {
+  color: #52c41a;
+}
+
+.k8s-resources-page .status-warning {
+  color: #faad14;
+}
+
+.k8s-resources-page .status-error {
+  color: #f5222d;
+}
+
+.k8s-resources-page .status-processing {
+  color: #1890ff;
+}
+
+/* 响应式布局调整 */
+@media screen and (max-width: 768px) {
+  .k8s-resources-page {
+    margin: 10px;
+  }
+  
+  .k8s-resources-page .ant-card-head-title {
+    font-size: 14px;
+  }
+  
+  .k8s-resources-page .ant-tabs-tab {
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+} 

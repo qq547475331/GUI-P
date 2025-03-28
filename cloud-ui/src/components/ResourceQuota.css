@@ -1,0 +1,53 @@
+.resource-quota {
+  padding: 15px;
+  background-color: #fff;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  margin-top: 10px;
+}
+
+.resource-quota h3 {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 15px;
+  color: #333;
+}
+
+.quota-item {
+  display: flex;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.quota-label {
+  width: 60px;
+  font-size: 12px;
+  color: #666;
+}
+
+.quota-progress {
+  flex: 1;
+  margin-right: 10px;
+}
+
+.quota-value {
+  width: 40px;
+  font-size: 12px;
+  color: #999;
+  text-align: right;
+}
+
+.quota-total {
+  width: 40px;
+  font-size: 12px;
+  color: #333;
+  font-weight: 500;
+  text-align: right;
+}
+
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100px;
+} 

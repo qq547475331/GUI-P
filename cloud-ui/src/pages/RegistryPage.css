@@ -1,0 +1,8 @@
+.registry-page {
+  padding: 0;
+  width: 100%;
+}
+
+.registry-page .ant-table-wrapper {
+  margin-top: 16px;
+} 

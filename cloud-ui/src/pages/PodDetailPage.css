@@ -1,0 +1,70 @@
+.pod-detail-page {
+  padding: 20px;
+  background-color: #f5f5f5;
+  min-height: 100%;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 300px;
+}
+
+.pod-labels {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pod-detail-page .ant-tabs-content {
+  background-color: #fff;
+  padding: 16px;
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* 确保Tab内容区域有足够高度 */
+.pod-detail-page .ant-tabs-tabpane {
+  min-height: 400px;
+}
+
+/* 增加日志和终端容器的底部间距 */
+.pod-logs-container,
+.pod-terminal-container {
+  margin-bottom: 20px;
+}
+
+/* 全屏模式 */
+.fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  background: #fff;
+  padding: 20px;
+  overflow: auto;
+}
+
+/* 适应不同屏幕大小 */
+@media (max-width: 768px) {
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  
+  .page-header button {
+    margin-top: 10px;
+  }
+} 
