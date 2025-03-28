@@ -45,24 +45,18 @@
 
 ## 截图展示
 
-### 应用管理界面
-![应用管理界面](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202503280201970.png)
 
-### 工作负载管理
-![工作负载管理](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202503280202017.png)
+### 应用列表界面
+![应用列表界面](https://picture-base.oss-cn-hangzhou.aliyuncs.com/image-20250329052617069.png)
 
-### 应用创建界面
-![应用创建界面](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202503280202760.png)
+### 应用详情界面
+![应用详情界面](https://picture-base.oss-cn-hangzhou.aliyuncs.com/image-20250329052626951.png)
 
+### 应用详情的pod列表界面
+![应用详情的pod列表界面](https://picture-base.oss-cn-hangzhou.aliyuncs.com/image-20250329052642780.png)
 
-
-![image-20250329052617069](https://picture-base.oss-cn-hangzhou.aliyuncs.com/image-20250329052617069.png)
-
-![image-20250329052626951](https://picture-base.oss-cn-hangzhou.aliyuncs.com/image-20250329052626951.png)
-
-![image-20250329052642780](https://picture-base.oss-cn-hangzhou.aliyuncs.com/image-20250329052642780.png)
-
-![image-20250329052651044](https://picture-base.oss-cn-hangzhou.aliyuncs.com/image-20250329052651044.png)
+### 查看pod日志界面
+![查看pod日志界面](https://picture-base.oss-cn-hangzhou.aliyuncs.com/image-20250329052651044.png)
 
 
 
