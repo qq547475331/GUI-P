@@ -54,6 +54,18 @@
 ### 应用创建界面
 ![应用创建界面](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202503280202760.png)
 
+
+
+![image-20250329052617069](https://picture-base.oss-cn-hangzhou.aliyuncs.com/image-20250329052617069.png)
+
+![image-20250329052626951](https://picture-base.oss-cn-hangzhou.aliyuncs.com/image-20250329052626951.png)
+
+![image-20250329052642780](https://picture-base.oss-cn-hangzhou.aliyuncs.com/image-20250329052642780.png)
+
+![image-20250329052651044](https://picture-base.oss-cn-hangzhou.aliyuncs.com/image-20250329052651044.png)
+
+
+
 ## 快速开始
 
 ### 安装依赖
