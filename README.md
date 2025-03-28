@@ -40,9 +40,25 @@
 ### 后端 (cloud-api)
 - Go语言
 - Gin Web框架
-- 客户端
 - client-go与Kubernetes API交互
 - WebSocket支持实时数据传输
+- PostgreSQL持久化存储
+
+## 数据存储
+
+### PostgreSQL 数据库
+- 应用配置和元数据持久化存储
+- Kubernetes资源关联管理
+- 集群配置信息安全存储
+- 数据库结构包含以下主要表:
+  - `applications`: 存储应用配置信息
+  - `kube_configs`: 存储Kubernetes集群配置
+  - `kubernetes_resources`: 记录应用关联的K8s资源
+
+### 数据库连接管理
+- 连接池优化: 最大25个连接，10个空闲连接
+- 自动重连机制: 失败后最多3次重试
+- 连接生命周期管理: 最大生命期10分钟，空闲超时5分钟
 
 ## 截图展示
 
@@ -78,6 +94,19 @@ npm install
 cd cloud-api
 go mod download
 ```
+### 数据库配置
+
+创建PostgreSQL数据库并配置以下环境变量或修改配置文件：
+
+```bash
+# PostgreSQL数据库配置
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=admin
+DB_PASSWORD=password
+DB_NAME=clouddb
+DB_SCHEMA=public
+```
 
 ### 启动服务
 
@@ -102,6 +131,7 @@ go run main.go
 
 - Node.js 14.x+
 - Go 1.19+
+- PostgreSQL 13+
 - 可访问的Kubernetes集群
 - 现代浏览器（Chrome、Firefox、Edge等）
 
@@ -135,6 +165,17 @@ go build -o cloud-deployment-api main.go
 # 将编译后的二进制文件部署到服务器
 ```
 
+### 数据库部署
+
+1. 安装PostgreSQL数据库（推荐13版本或更高）
+2. 创建数据库和用户
+   ```sql
+   CREATE DATABASE clouddb;
+   CREATE USER admin WITH ENCRYPTED PASSWORD 'password';
+   GRANT ALL PRIVILEGES ON DATABASE clouddb TO admin;
+   ```
+3. 初始化表结构（应用首次启动会自动验证表结构）
+
 ## 特性与优势
 
 - 简洁直观的用户界面，降低Kubernetes使用门槛
@@ -142,6 +183,7 @@ go build -o cloud-deployment-api main.go
 - 应用部署流程简化，支持多种工作负载类型
 - 支持实时资源监控和状态更新
 - 响应式设计，适配不同设备屏幕
+- 可靠的数据持久化，确保配置不丢失
 
 ## 贡献指南
 
