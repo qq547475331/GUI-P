@@ -40,7 +40,8 @@
 ### 后端 (cloud-api)
 - Go语言
 - Gin Web框架
-- 客户端-go与Kubernetes API交互
+- 客户端
+- client-go与Kubernetes API交互
 - WebSocket支持实时数据传输
 
 ## 截图展示
