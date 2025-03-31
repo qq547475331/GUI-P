@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -23,6 +24,9 @@ func main() {
 		log.Fatal("Failed to initialize database:", err)
 	}
 
+	// 启动命名空间缓存同步任务
+	go startNamespaceSyncTask()
+
 	// 初始化路由
 	r := setupRouter()
 
@@ -30,6 +34,54 @@ func main() {
 	fmt.Println("Server is running on http://localhost:8080")
 	if err := r.Run(":8080"); err != nil {
 		log.Fatal("Failed to start server:", err)
+	}
+}
+
+// startNamespaceSyncTask 启动定时同步命名空间数据的任务
+func startNamespaceSyncTask() {
+	// 等待5秒以确保其他初始化完成
+	time.Sleep(5 * time.Second)
+	
+	// 首次启动时等待10秒后再同步，避免和用户请求冲突
+	time.Sleep(10 * time.Second)
+	log.Println("执行首次命名空间同步...")
+	
+	// 使用defer-recover防止崩溃
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("命名空间同步panic: %v", r)
+			}
+		}()
+		
+		if err := model.SyncNamespacesToCache(model.GetK8sManager()); err != nil {
+			log.Printf("命名空间同步失败: %v", err)
+		} else {
+			log.Println("命名空间同步完成")
+		}
+	}()
+	
+	// 每1小时同步一次，降低频率
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	
+	for range ticker.C {
+		log.Println("执行定时命名空间同步...")
+		
+		// 使用defer-recover防止崩溃
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("命名空间同步panic: %v", r)
+				}
+			}()
+			
+			if err := model.SyncNamespacesToCache(model.GetK8sManager()); err != nil {
+				log.Printf("命名空间同步失败: %v", err)
+			} else {
+				log.Println("命名空间同步完成")
+			}
+		}()
 	}
 }
 

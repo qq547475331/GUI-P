@@ -45,25 +45,10 @@ func GetK8sNamespaces(c *gin.Context) {
 	// 检查是否有相同请求正在处理
 	requestMutex.Lock()
 	if inProgressRequests[requestKey] {
+		// 当有重复请求时直接返回默认命名空间列表，但状态码保持200
 		requestMutex.Unlock()
-		c.JSON(http.StatusTooManyRequests, gin.H{
-			"error": "请求处理中，请稍后再试",
-			"code": "REQUEST_IN_PROGRESS",
-		})
-		return
-	}
-	
-	// 检查缓存
-	cacheMutex.RLock()
-	namespaces, cacheExists := namespacesCache[id]
-	timestamp, timeExists := namespacesTimestamp[id]
-	cacheMutex.RUnlock()
-	
-	// 如果缓存有效（存在且不超过5分钟）
-	if cacheExists && timeExists && time.Since(timestamp) < 5*time.Minute {
-		// 添加缓存命中日志
-		log.Printf("命名空间缓存命中: %s", id)
-		c.JSON(http.StatusOK, convertNamespacesToStrings(namespaces))
+		log.Printf("检测到并发命名空间请求，返回默认命名空间: %s", id)
+		c.JSON(http.StatusOK, []string{"default", "kube-system", "kube-public"})
 		return
 	}
 	
@@ -76,54 +61,46 @@ func GetK8sNamespaces(c *gin.Context) {
 		requestMutex.Lock()
 		delete(inProgressRequests, requestKey)
 		requestMutex.Unlock()
+		log.Printf("命名空间请求处理完成: %s", id)
 	}()
 	
-	// 首先从数据库获取 kubeconfig
-	kubeConfig, err := model.GetKubeConfigByIDFromDB(id)
-	if err != nil {
-		log.Printf("无法从数据库获取KubeConfig (ID: %s): %v", id, err)
-		// 返回空数组而不是错误
-		c.JSON(http.StatusOK, []string{"default"})
+	// 直接从缓存获取命名空间
+	namespacesCache, err := model.GetNamespacesFromCache(id)
+	if err == nil && len(namespacesCache) > 0 {
+		// 缓存命中，直接返回
+		log.Printf("命名空间缓存命中，直接返回: %s", id)
+		
+		// 转换并返回结果
+		namespaceList := make([]string, len(namespacesCache))
+		for i, ns := range namespacesCache {
+			namespaceList[i] = ns.Name
+		}
+		
+		c.JSON(http.StatusOK, namespaceList)
+		
+		// 检查是否需要后台异步更新缓存（超过1小时）
+		if len(namespacesCache) > 0 && time.Since(namespacesCache[0].LastSyncedAt) > 1*time.Hour {
+			// 使用goroutine异步触发更新，不阻塞当前请求
+			go func() {
+				if err := model.RefreshNamespaceCache(id, model.GetK8sManager()); err != nil {
+					log.Printf("后台刷新命名空间缓存失败: %s, %v", id, err)
+				}
+			}()
+		}
 		return
 	}
 	
-	// 确保 K8s Manager 已初始化该配置
-	err = model.GetK8sManager().InitializeConfig(id, kubeConfig.Content)
+	// 缓存未命中，尝试使用优化函数一次性获取并缓存
+	log.Printf("命名空间缓存未命中，从API获取并缓存: %s", id)
+	namespaceList, err := model.GetNamespacesList(id, model.GetK8sManager())
 	if err != nil {
-		log.Printf("初始化KubeConfig失败 (ID: %s): %v", id, err)
-		// 返回空数组而不是错误
-		c.JSON(http.StatusOK, []string{"default"})
+		log.Printf("获取命名空间列表失败: %s, %v", id, err)
+		c.JSON(http.StatusOK, []string{"default", "kube-system", "kube-public"})
 		return
 	}
 	
-	// 验证 kubeconfig
-	err = model.GetK8sManager().ValidateKubeConfig(id)
-	if err != nil {
-		log.Printf("验证KubeConfig失败 (ID: %s): %v", id, err)
-		// 返回空数组而不是错误
-		c.JSON(http.StatusOK, []string{"default"})
-		return
-	}
-	
-	// 调用 Kubernetes 获取命名空间
-	namespaces, err = model.GetK8sManager().GetNamespaces(id)
-	if err != nil {
-		log.Printf("获取命名空间失败 (ID: %s): %v", id, err)
-		// 返回空数组而不是错误
-		c.JSON(http.StatusOK, []string{"default"})
-		return
-	}
-	
-	// 更新缓存
-	cacheMutex.Lock()
-	namespacesCache[id] = namespaces
-	namespacesTimestamp[id] = time.Now()
-	cacheMutex.Unlock()
-	
-	// 添加成功获取日志
-	log.Printf("成功获取命名空间列表: %s, 数量: %d", id, len(namespaces))
-	
-	c.JSON(http.StatusOK, convertNamespacesToStrings(namespaces))
+	log.Printf("成功获取命名空间列表: %s, 数量: %d", id, len(namespaceList))
+	c.JSON(http.StatusOK, namespaceList)
 }
 
 // GetK8sPods 获取Kubernetes Pod列表

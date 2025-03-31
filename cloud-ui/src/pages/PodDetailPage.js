@@ -105,6 +105,22 @@ const PodDetailPage = () => {
     };
   }, [kubeConfigId, namespace, podName]);
 
+  // 当标签页变化为terminal时，记录到URL
+  useEffect(() => {
+    // 更新URL参数，不触发页面刷新
+    const searchParams = new URLSearchParams(location.search);
+    searchParams.set('tab', activeTab);
+    const newUrl = `${location.pathname}?${searchParams.toString()}`;
+    window.history.replaceState(null, '', newUrl);
+    
+    // 当切换到终端标签页时，确保终端已准备就绪
+    if (activeTab === 'terminal' && selectedContainer) {
+      console.log('打开终端标签页，容器:', selectedContainer);
+      // 这里不需要额外操作，因为PodTerminal组件内部已经处理了自动连接
+      // PodTerminal组件在挂载和selectedContainer变化时会自动调用connectToTerminal
+    }
+  }, [activeTab, selectedContainer, location.pathname, location.search]);
+
   // 获取Pod状态对应的标签颜色
   const getStatusColor = (status) => {
     if (!status) return 'default';

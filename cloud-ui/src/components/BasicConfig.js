@@ -21,10 +21,29 @@ const BasicConfig = ({ form, initialValues = {} }) => {
   const [selectedKubeConfigId, setSelectedKubeConfigId] = useState(null);
   const [selectedNamespace, setSelectedNamespace] = useState(null);
   const [loading, setLoading] = useState(true);
+  // 添加新状态变量，跟踪是否已经加载过KubeConfig列表
+  const [configsLoaded, setConfigsLoaded] = useState(false);
 
-  // 加载KubeConfig列表
+  // 加载KubeConfig列表（只在组件挂载时执行一次）
   useEffect(() => {
     const loadKubeConfigs = async () => {
+      // 如果已经加载过且有数据，直接返回，避免重复加载
+      if (configsLoaded && kubeconfigs.length > 0) {
+        console.log('KubeConfig列表已加载，跳过重复获取');
+        
+        // 即使跳过加载，也确保使用初始值（如果有）
+        if (initialValues?.kubeConfigId && selectedKubeConfigId !== initialValues.kubeConfigId) {
+          console.log('使用初始值的KubeConfigId:', initialValues.kubeConfigId);
+          setSelectedKubeConfigId(initialValues.kubeConfigId);
+          form.setFieldsValue({ kubeConfigId: initialValues.kubeConfigId });
+          
+          // 如果初始值变更，重新获取对应的命名空间
+          fetchNamespaces(initialValues.kubeConfigId);
+        }
+        
+        return;
+      }
+      
       try {
         setLoading(true);
         console.log('开始获取KubeConfig列表...');
@@ -33,34 +52,45 @@ const BasicConfig = ({ form, initialValues = {} }) => {
         
         if (Array.isArray(configs) && configs.length > 0) {
           setKubeconfigs(configs);
+          setConfigsLoaded(true);  // 标记为已加载
           
           // 保存集群列表到表单，用于后续根据名称查找ID
           form.setFieldsValue({ kubeconfigs: configs });
           
-          // 如果有初始值，使用初始值
+          let kubeConfigIdToUse;
+          
+          // 使用优先级：1. 初始值 2. localStorage存储的值 3. 第一个可用配置
           if (initialValues?.kubeConfigId) {
             console.log('使用初始值的KubeConfigId:', initialValues.kubeConfigId);
-            setSelectedKubeConfigId(initialValues.kubeConfigId);
-            form.setFieldsValue({ 
-              kubeConfigId: initialValues.kubeConfigId,
-            });
-            fetchNamespaces(initialValues.kubeConfigId);
+            kubeConfigIdToUse = initialValues.kubeConfigId;
           } else {
-            // 如果没有初始值，使用第一个
-            console.log('使用第一个可用的KubeConfigId:', configs[0].id);
-            setSelectedKubeConfigId(configs[0].id);
-            form.setFieldsValue({ 
-              kubeConfigId: configs[0].id,
-            });
-            // 将选择的集群ID存入localStorage
-            try {
-              localStorage.setItem('lastSelectedKubeConfigId', configs[0].id);
-              console.log('已保存kubeConfigId到本地存储:', configs[0].id);
-            } catch (e) {
-              console.warn('保存kubeConfigId到本地存储失败:', e);
+            // 尝试从localStorage获取上次使用的配置
+            const savedId = localStorage.getItem('lastSelectedKubeConfigId');
+            const isValidSavedId = savedId && configs.some(c => c.id === savedId);
+            
+            if (isValidSavedId) {
+              console.log('使用localStorage保存的KubeConfigId:', savedId);
+              kubeConfigIdToUse = savedId;
+            } else {
+              console.log('使用第一个可用的KubeConfigId:', configs[0].id);
+              kubeConfigIdToUse = configs[0].id;
             }
-            fetchNamespaces(configs[0].id);
           }
+          
+          // 设置选中的KubeConfigId
+          setSelectedKubeConfigId(kubeConfigIdToUse);
+          form.setFieldsValue({ kubeConfigId: kubeConfigIdToUse });
+          
+          // 将选择的集群ID存入localStorage
+          try {
+            localStorage.setItem('lastSelectedKubeConfigId', kubeConfigIdToUse);
+            console.log('已保存kubeConfigId到本地存储:', kubeConfigIdToUse);
+          } catch (e) {
+            console.warn('保存kubeConfigId到本地存储失败:', e);
+          }
+          
+          // 获取命名空间
+          fetchNamespaces(kubeConfigIdToUse);
         } else {
           console.warn('未获取到有效的KubeConfig列表');
           message.error({
@@ -83,10 +113,11 @@ const BasicConfig = ({ form, initialValues = {} }) => {
     
     // 确保组件卸载时取消所有异步操作
     return () => {};
-  }, [initialValues, form]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // 空依赖数组，确保只在组件挂载时执行一次
 
-  // 获取命名空间列表
-  const fetchNamespaces = async (kubeConfigId) => {
+  // 获取命名空间列表（优化版）
+  const fetchNamespaces = async (kubeConfigId, retryCount = 0) => {
     if (!kubeConfigId) {
       console.warn('fetchNamespaces: 没有提供kubeConfigId');
       setLoading(false);
@@ -94,16 +125,22 @@ const BasicConfig = ({ form, initialValues = {} }) => {
       return;
     }
     
-    console.log('获取命名空间列表，kubeConfigId:', kubeConfigId);
+    // 检查如果已经有相同kubeConfigId的命名空间列表且长度大于默认值，不再设置loading
+    const alreadyHasData = namespaces.length > 3 && selectedKubeConfigId === kubeConfigId;
     
-    // 设置加载状态
-    setLoading(true);
+    if (!alreadyHasData) {
+      console.log('获取命名空间列表，kubeConfigId:', kubeConfigId);
+      setLoading(true);
+    } else {
+      console.log('已有命名空间数据，在后台刷新，kubeConfigId:', kubeConfigId);
+    }
     
-    // 为了避免无限加载，设置一个最大超时时间
+    // 为了避免无限加载，设置一个最大超时时间（随重试次数增加）
+    const timeoutMs = Math.min(10000 + (retryCount * 5000), 30000); // 最多30秒
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => {
-        reject(new Error('获取命名空间列表超时(20秒)'));
-      }, 20000);
+        reject(new Error(`获取命名空间列表超时(${timeoutMs/1000}秒)`));
+      }, timeoutMs);
     });
     
     try {
@@ -118,73 +155,91 @@ const BasicConfig = ({ form, initialValues = {} }) => {
       if (Array.isArray(data) && data.length > 0) {
         setNamespaces(data);
         
-        // 如果有初始命名空间，使用它
-        if (initialValues?.namespace) {
+        // 如果有初始命名空间且在列表中，使用它
+        if (initialValues?.namespace && data.includes(initialValues.namespace)) {
           console.log('使用初始命名空间:', initialValues.namespace);
           form.setFieldsValue({ namespace: initialValues.namespace });
           setSelectedNamespace(initialValues.namespace);
         } else {
-          // 默认选择第一个命名空间
-          console.log('使用第一个命名空间:', data[0]);
-          form.setFieldsValue({ namespace: data[0] });
-          setSelectedNamespace(data[0]);
+          // 默认选择default或第一个命名空间
+          const defaultNs = data.includes('default') ? 'default' : data[0];
+          console.log('使用命名空间:', defaultNs);
+          form.setFieldsValue({ namespace: defaultNs });
+          setSelectedNamespace(defaultNs);
+        }
+        
+        // 异步更新localStorage中的命名空间列表，用于离线备份
+        try {
+          localStorage.setItem(`namespaces_${kubeConfigId}`, JSON.stringify(data));
+          localStorage.setItem(`namespaces_${kubeConfigId}_timestamp`, Date.now().toString());
+        } catch (e) {
+          console.warn('保存命名空间到localStorage失败:', e);
         }
       } else {
-        // 设置默认命名空间
-        const defaultNamespaces = ['default', 'kube-system', 'kube-public'];
-        setNamespaces(defaultNamespaces);
-        
-        // 使用default命名空间
-        form.setFieldsValue({ namespace: 'default' });
-        setSelectedNamespace('default');
-        
-        message.warning({
-          content: '未获取到命名空间列表，使用默认值',
-          duration: 6
-        });
+        handleNamespacesFallback(kubeConfigId, '未获取到有效的命名空间列表');
       }
     } catch (error) {
       console.error('获取命名空间失败:', error);
       
-      // 分析错误类型
-      let errorMessage = '获取命名空间列表失败，将使用默认命名空间';
-      
-      // 处理服务器错误
-      if (error.response && error.response.status >= 500) {
-        errorMessage = 
-          `服务器端错误(500)，可能是以下原因:\n` +
-          `1. Kubernetes集群无法连接\n` + 
-          `2. KubeConfig配置无效\n` + 
-          `3. 后端服务出现问题\n` +
-          `将使用默认命名空间继续`;
+      // 尝试重试（最多3次）
+      if (retryCount < 2) {
+        console.log(`尝试重新获取命名空间（第${retryCount + 1}次重试）`);
         
-        console.error(`服务器返回500错误: ${kubeConfigId}`, error.response);
-      } else if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-        errorMessage = '获取命名空间超时，可能是Kubernetes集群响应缓慢，将使用默认命名空间';
-      } else if (error.message === '获取命名空间列表超时(20秒)') {
-        errorMessage = '获取命名空间操作超时(20秒)，将使用默认命名空间';
+        // 递归调用但增加重试计数
+        setTimeout(() => {
+          fetchNamespaces(kubeConfigId, retryCount + 1);
+        }, 2000); // 延迟2秒后重试
+        return;
       }
       
-      // 显示错误消息
-      message.error({
-        content: errorMessage,
-        duration: 15,
-        key: 'namespace-error'
-      });
-      
-      // 设置默认命名空间
-      const defaultNamespaces = ['default', 'kube-system', 'kube-public'];
-      setNamespaces(defaultNamespaces);
-      
-      // 使用default命名空间
-      form.setFieldsValue({ namespace: 'default' });
-      setSelectedNamespace('default');
+      // 所有重试都失败，使用备用数据
+      handleNamespacesFallback(kubeConfigId, '获取命名空间失败，使用默认值');
     } finally {
-      // 确保loading状态结束
-      setLoading(false);
+      // 确保loading状态结束（即使使用重试）
+      if (!alreadyHasData) {
+        setLoading(false);
+      }
     }
   };
-  
+
+  // 命名空间获取失败时的备用处理
+  const handleNamespacesFallback = (kubeConfigId, warningMessage) => {
+    console.warn(warningMessage);
+    
+    // 尝试从localStorage读取历史数据
+    try {
+      const cachedData = localStorage.getItem(`namespaces_${kubeConfigId}`);
+      const cachedTimestamp = localStorage.getItem(`namespaces_${kubeConfigId}_timestamp`);
+      
+      // 如果有不超过1天的缓存数据
+      if (cachedData && cachedTimestamp && 
+          (Date.now() - parseInt(cachedTimestamp)) < 86400000) {
+        const parsedData = JSON.parse(cachedData);
+        if (Array.isArray(parsedData) && parsedData.length > 0) {
+          console.log('使用localStorage缓存的命名空间列表');
+          setNamespaces(parsedData);
+          form.setFieldsValue({ namespace: parsedData.includes('default') ? 'default' : parsedData[0] });
+          setSelectedNamespace(parsedData.includes('default') ? 'default' : parsedData[0]);
+          message.warning('使用本地缓存的命名空间列表', 3);
+          return;
+        }
+      }
+    } catch (e) {
+      console.error('读取本地命名空间缓存失败:', e);
+    }
+    
+    // 无缓存或缓存失效，使用默认值
+    const defaultNamespaces = ['default', 'kube-system', 'kube-public'];
+    setNamespaces(defaultNamespaces);
+    form.setFieldsValue({ namespace: 'default' });
+    setSelectedNamespace('default');
+    
+    message.warning({
+      content: warningMessage,
+      duration: 5
+    });
+  };
+
   // 添加自定义命名空间
   const addCustomNamespace = (name) => {
     if (!name || namespaces.includes(name)) return;
@@ -402,12 +457,12 @@ const BasicConfig = ({ form, initialValues = {} }) => {
               {kubeconfigs.map(config => (
                 <Option key={config.id} value={config.id}>
                   {config.name} ({config.currentContext})
-                  {selectedKubeConfigId === config.id && loading && (
+                  {selectedKubeConfigId === config.id && loading && !namespaces.length && (
                     <Tag color="processing" style={{ marginLeft: 8 }}>
                       连接中...
                     </Tag>
                   )}
-                  {selectedKubeConfigId === config.id && !loading && namespaces.length > 0 && (
+                  {selectedKubeConfigId === config.id && namespaces.length > 0 && (
                     <Tag color="success" style={{ marginLeft: 8 }}>
                       已连接
                     </Tag>

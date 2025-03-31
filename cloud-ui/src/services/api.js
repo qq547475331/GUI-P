@@ -364,25 +364,25 @@ const apiService = {
   
   // 获取所有KubeConfig配置
   getKubeConfigs: () => {
-    const CACHE_TTL = 3600000; // 延长缓存有效期至1小时
+    const CACHE_TTL = 7200000; // 延长缓存有效期至2小时
     
     // 如果已经有数据且在有效期内，直接使用缓存
     if (kubeConfigsCache.data && (Date.now() - kubeConfigsCache.timestamp < CACHE_TTL)) {
-      console.log('使用缓存的KubeConfig列表');
+      console.log('使用缓存的KubeConfig列表，有效期内无需重新请求');
       return Promise.resolve(kubeConfigsCache.data);
     }
     
     // 如果正在请求中，返回待处理的Promise
     if (kubeConfigsCache.isRequesting || kubeConfigsCache.pendingPromise) {
       console.log('已有KubeConfig请求进行中，等待结果');
-      return kubeConfigsCache.pendingPromise || Promise.resolve([]);
+      return kubeConfigsCache.pendingPromise || Promise.resolve(kubeConfigsCache.data || []);
     }
     
-    console.log('获取KubeConfig列表');
+    console.log('缓存过期或不存在，重新获取KubeConfig列表');
     kubeConfigsCache.isRequesting = true;
     
     // 创建并缓存Promise
-    kubeConfigsCache.pendingPromise = apiClient.get('/kubeconfig')
+    kubeConfigsCache.pendingPromise = apiClient.get('/kubeconfig', { timeout: 15000 })
       .then(response => {
         console.log('KubeConfig列表获取成功:', response);
         
@@ -390,19 +390,39 @@ const apiService = {
         kubeConfigsCache.data = response;
         kubeConfigsCache.timestamp = Date.now();
         
+        // 同时保存到localStorage作为备份缓存
+        try {
+          localStorage.setItem('kubeConfigsCache', JSON.stringify(response));
+          localStorage.setItem('kubeConfigsCacheTimestamp', Date.now().toString());
+        } catch (e) {
+          console.warn('无法保存KubeConfig缓存到localStorage:', e);
+        }
+        
         return response;
       })
       .catch(error => {
         console.error('获取KubeConfig列表失败:', error);
-        // 出错时返回空数组而不是拒绝Promise
-        return [];
+        
+        // 尝试从localStorage恢复缓存数据
+        try {
+          const cachedData = localStorage.getItem('kubeConfigsCache');
+          if (cachedData) {
+            console.log('从localStorage恢复KubeConfig缓存');
+            return JSON.parse(cachedData);
+          }
+        } catch (e) {
+          console.error('从localStorage恢复缓存失败:', e);
+        }
+        
+        // 无缓存可用时返回空数组
+        return kubeConfigsCache.data || [];
       })
       .finally(() => {
         // 请求完成，重置状态
         setTimeout(() => {
           kubeConfigsCache.isRequesting = false;
           kubeConfigsCache.pendingPromise = null;
-        }, 100); // 小延迟确保状态更新不会互相干扰
+        }, 100);
       });
     
     return kubeConfigsCache.pendingPromise;
@@ -1164,11 +1184,31 @@ const apiService = {
 
   // 获取Pod终端WebSocket URL
   getPodTerminalUrl: (kubeConfigId, namespace, podName, containerName) => {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const apiBase = process.env.REACT_APP_API_BASE_URL || '/api';
+    // 获取后端API地址和WebSocket协议
+    const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || '/api';
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
     
-    return `${wsProtocol}//${host}${apiBase}/pods/exec?kubeConfigId=${kubeConfigId}&namespace=${namespace}&podName=${podName}&containerName=${containerName}&command=/bin/sh`;
+    // 从完整URL中提取主机和路径
+    let wsHost, wsPath;
+    try {
+      if (apiBaseUrl.startsWith('http://') || apiBaseUrl.startsWith('https://')) {
+        // 如果是完整URL，解析出主机和路径部分
+        const url = new URL(apiBaseUrl);
+        wsHost = url.host;  // 如 localhost:8080
+        wsPath = url.pathname;  // 如 /api
+      } else {
+        // 如果只是路径，使用当前窗口的主机
+        wsHost = window.location.host;
+        wsPath = apiBaseUrl.startsWith('/') ? apiBaseUrl : `/${apiBaseUrl}`;
+      }
+      
+      // 构建完整的WebSocket URL
+      return `${wsProtocol}://${wsHost}${wsPath}/pods/exec?kubeConfigId=${kubeConfigId}&namespace=${namespace}&podName=${podName}&containerName=${containerName}&command=/bin/sh`;
+    } catch (error) {
+      console.error('构建WebSocket URL失败:', error);
+      // 回退到使用当前窗口主机
+      return `${wsProtocol}://${window.location.host}/api/pods/exec?kubeConfigId=${kubeConfigId}&namespace=${namespace}&podName=${podName}&containerName=${containerName}&command=/bin/sh`;
+    }
   },
   
   // 获取Pod列表
@@ -1183,12 +1223,31 @@ const apiService = {
   
   // 获取Pod Terminal WebSocket URL
   getPodLogsStreamUrl: (kubeConfigId, namespace, podName, containerName, tailLines = 100) => {
-    const baseUrl = process.env.REACT_APP_API_BASE_URL || '/api';
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
+    // 获取后端API地址和WebSocket协议
+    const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || '/api';
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
     
-    // 构建WebSocket URL
-    return `${wsProtocol}//${host}${baseUrl}/pods/${podName}/logs?kubeConfigId=${kubeConfigId}&namespace=${namespace}&containerName=${containerName}&tailLines=${tailLines}&follow=true`;
+    // 从完整URL中提取主机和路径
+    let wsHost, wsPath;
+    try {
+      if (apiBaseUrl.startsWith('http://') || apiBaseUrl.startsWith('https://')) {
+        // 如果是完整URL，解析出主机和路径部分
+        const url = new URL(apiBaseUrl);
+        wsHost = url.host;  // 如 localhost:8080
+        wsPath = url.pathname;  // 如 /api
+      } else {
+        // 如果只是路径，使用当前窗口的主机
+        wsHost = window.location.host;
+        wsPath = apiBaseUrl.startsWith('/') ? apiBaseUrl : `/${apiBaseUrl}`;
+      }
+      
+      // 构建WebSocket URL
+      return `${wsProtocol}://${wsHost}${wsPath}/pods/${podName}/logs?kubeConfigId=${kubeConfigId}&namespace=${namespace}&containerName=${containerName}&tailLines=${tailLines}&follow=true`;
+    } catch (error) {
+      console.error('构建WebSocket URL失败:', error);
+      // 回退到使用当前窗口主机
+      return `${wsProtocol}://${window.location.host}/api/pods/${podName}/logs?kubeConfigId=${kubeConfigId}&namespace=${namespace}&containerName=${containerName}&tailLines=${tailLines}&follow=true`;
+    }
   }
 };
 
