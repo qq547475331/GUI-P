@@ -75,33 +75,37 @@
 ### 查看pod日志界面
 ![查看pod日志界面](https://picture-base.oss-cn-hangzhou.aliyuncs.com/image-20250329052651044.png)
 
-![image-20250401113121164](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202504011131317.png)
+### 应用列表
 
+![image-20250401113635390](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202504011136450.png)
 
-
-
-
-
+### 进入pod终端
 
 ![image-20250401113201873](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202504011132954.png)
 
 
-
-
-
-
+### 新建应用-基本信息
 
 ![image-20250401113250584](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202504011132674.png)
 
+### 新建应用-容器设置
+
 ![image-20250401113226845](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202504011132965.png)
+
+### 新建应用-容器设置-高级配置选项
 
 ![image-20250401113337859](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202504011133951.png)
 
 ![image-20250401113342395](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202504011133489.png)
 
+### 新建应用-确认信息
+
 ![image-20250401113419525](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202504011134606.png)
 
 ![image-20250401113423516](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202504011134596.png)
+
+
+
 
 ## 快速开始
 
