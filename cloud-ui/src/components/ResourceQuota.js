@@ -26,7 +26,7 @@ const ResourceQuota = ({ formData }) => {
     fetchResourceQuota();
   }, []);
 
-  // 监听表单数据变化，重新计算资源使用情况和价格
+  // 监听表单数据变化，重新计算资源使用情况
   useEffect(() => {
     const calculateResourceUsage = async () => {
       if (!formData) return;
@@ -42,28 +42,20 @@ const ResourceQuota = ({ formData }) => {
           volumes: formData.volumes || []
         };
         
-        // 调用API获取价格
-        try {
-          const priceData = await apiService.getEstimatedPrice(resources);
-          setQuotaData(priceData);
-        } catch (error) {
-          console.error('获取价格失败:', error);
-          
-          // 使用本地计算的备选方案
-          const cpuUsage = resources.cpu * resources.instances;
-          const memoryUsage = resources.memory * resources.instances / 1024; // 转为GB
-          const storageUsage = resources.volumes.reduce((total, vol) => total + (vol.size || 0), 0);
-          
-          setQuotaData({
-            cpu: cpuUsage,
-            cpuPercent: Math.min(cpuUsage / 1 * 100, 100), // 假设最大配额为1核
-            memory: memoryUsage,
-            memoryPercent: Math.min(memoryUsage / 1 * 100, 100), // 假设最大配额为1GB
-            storage: storageUsage,
-            storagePercent: Math.min(storageUsage / 10 * 100, 100), // 假设最大配额为10GB
-            total: cpuUsage * 0.5 + memoryUsage * 0.3 + storageUsage * 0.05 // 简单计算
-          });
-        }
+        // 使用本地计算的备选方案
+        const cpuUsage = resources.cpu * resources.instances;
+        const memoryUsage = resources.memory * resources.instances / 1024; // 转为GB
+        const storageUsage = resources.volumes.reduce((total, vol) => total + (vol.size || 0), 0);
+        
+        setQuotaData({
+          cpu: cpuUsage,
+          cpuPercent: Math.min(cpuUsage / 1 * 100, 100), // 假设最大配额为1核
+          memory: memoryUsage,
+          memoryPercent: Math.min(memoryUsage / 1 * 100, 100), // 假设最大配额为1GB
+          storage: storageUsage,
+          storagePercent: Math.min(storageUsage / 10 * 100, 100), // 假设最大配额为10GB
+          total: cpuUsage * 0.5 + memoryUsage * 0.3 + storageUsage * 0.05 // 简单计算资源使用比例
+        });
       } catch (error) {
         console.error('计算资源使用出错:', error);
       } finally {
@@ -124,7 +116,7 @@ const ResourceQuota = ({ formData }) => {
           </div>
           
           <div className="quota-item">
-            <div className="quota-label">总价</div>
+            <div className="quota-label">资源占用比</div>
             <div className="quota-total">{quotaData.total?.toFixed(2) || '0.21'}</div>
           </div>
         </>

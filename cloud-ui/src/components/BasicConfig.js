@@ -347,14 +347,21 @@ const BasicConfig = ({ form, initialValues = {} }) => {
           <Form.Item
             name="appName"
             label="应用名称"
-            rules={[{ required: true, message: '请输入应用名称' }]}
+            rules={[
+              { required: true, message: '请输入应用名称!' },
+              { whitespace: true, message: '应用名称不能为空白字符!' },
+              { type: 'string', min: 2, message: '应用名称至少需要2个字符!' },
+              { pattern: /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/, message: '应用名称只能包含小写字母、数字和连字符，且必须以字母或数字开头和结尾' }
+            ]}
+            tooltip="应用名称将作为Kubernetes资源名称的一部分，只能使用小写字母、数字和连字符，且必须以字母或数字开头和结尾"
           >
             <Input 
-              placeholder="请输入应用名称" 
-              onChange={(e) => {
-                const value = e.target.value;
-                form.setFieldsValue({ appName: value });
-                console.log('应用名称已更新:', value);
+              placeholder="应用名称（如：my-app）" 
+              onBlur={(e) => {
+                const value = e.target.value?.trim();
+                if (value) {
+                  form.setFieldsValue({ appName: value });
+                }
               }}
             />
           </Form.Item>

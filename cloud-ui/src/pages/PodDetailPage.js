@@ -43,13 +43,23 @@ const PodDetailPage = () => {
   const [containers, setContainers] = useState([]);
   const [selectedContainer, setSelectedContainer] = useState('');
 
-  // 从查询参数或location state获取kubeConfigId
-  const kubeConfigId = id || new URLSearchParams(location.search).get('kubeConfigId');
+  // 从多种可能的来源获取kubeConfigId
+  const params = new URLSearchParams(location.search);
+  const kubeConfigId = id || 
+                     params.get('kubeConfigId') || 
+                     params.get('clusterId') || 
+                     (location.state && (location.state.kubeConfigId || location.state.clusterId));
   
   // 加载Pod详情
   const fetchPodDetails = async () => {
-    if (!kubeConfigId || !namespace || !podName) {
-      setError('缺少必要参数：集群ID、命名空间或Pod名称');
+    if (!kubeConfigId || kubeConfigId === 'undefined') {
+      setError(`缺少必要参数：集群ID（无效的kubeConfigId: ${kubeConfigId}）`);
+      setLoading(false);
+      return;
+    }
+
+    if (!namespace || !podName) {
+      setError('缺少必要参数：命名空间或Pod名称');
       setLoading(false);
       return;
     }
@@ -58,6 +68,7 @@ const PodDetailPage = () => {
     setError(null);
 
     try {
+      console.log('获取Pod详情，参数:', { kubeConfigId, namespace, podName });
       // 获取指定命名空间中的所有Pod
       const podsData = await apiService.getPods(kubeConfigId, namespace);
       

@@ -184,7 +184,6 @@ func registerRoutes(r *gin.Engine) {
 		// 其他资源路由
 		api.GET("/images", handler.GetImages)
 		api.GET("/quota", handler.GetResourceQuota)
-		api.POST("/price", handler.EstimatePrice)
 
 		// 添加Pod相关路由
 		api.GET("/pods", handler.GetPods)

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"encoding/json"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1052,7 +1053,273 @@ func (km *K8sManager) DeployApplication(app *Application) error {
 	// 设置容器端口
 	containerPort := int32(app.Port)
 	if containerPort <= 0 {
-		containerPort = 80 // 默认端口
+		containerPort = 8080 // 默认端口从80改为8080
+	}
+	
+	// 设置镜像拉取策略
+	var pullPolicy corev1.PullPolicy
+	switch app.ImagePullPolicy {
+	case "Always":
+		pullPolicy = corev1.PullAlways
+	case "Never":
+		pullPolicy = corev1.PullNever
+	case "IfNotPresent":
+		pullPolicy = corev1.PullIfNotPresent
+	default:
+		pullPolicy = corev1.PullIfNotPresent // 默认策略
+	}
+	
+	// 构建容器
+	container := corev1.Container{
+		Name:  appName,
+		Image: image,
+		Ports: []corev1.ContainerPort{
+			{
+				ContainerPort: containerPort,
+				Protocol:      corev1.ProtocolTCP, // 默认使用TCP协议
+				Name:          fmt.Sprintf("tcp-%d", containerPort),
+			},
+		},
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("100m"),
+				corev1.ResourceMemory: resource.MustParse("128Mi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("500m"),
+				corev1.ResourceMemory: resource.MustParse("512Mi"),
+			},
+		},
+		ImagePullPolicy: pullPolicy,
+	}
+	
+	// 设置容器启动命令和参数
+	if len(app.Command) > 0 {
+		container.Command = app.Command
+	}
+	if len(app.Args) > 0 {
+		container.Args = app.Args
+	}
+	
+	// 设置环境变量
+	if len(app.EnvVars) > 0 {
+		for _, env := range app.EnvVars {
+			// 直接设置值的环境变量
+			if env.Value != "" {
+				container.Env = append(container.Env, corev1.EnvVar{
+					Name:  env.Name,
+					Value: env.Value,
+				})
+			} else if env.ConfigMapKey != "" {
+				// 从ConfigMap获取值的环境变量
+				container.Env = append(container.Env, corev1.EnvVar{
+					Name: env.Name,
+					ValueFrom: &corev1.EnvVarSource{
+						ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: strings.Split(env.ConfigMapKey, ":")[0],
+							},
+							Key: strings.Split(env.ConfigMapKey, ":")[1],
+						},
+					},
+				})
+			} else if env.SecretKey != "" {
+				// 从Secret获取值的环境变量
+				container.Env = append(container.Env, corev1.EnvVar{
+					Name: env.Name,
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: strings.Split(env.SecretKey, ":")[0],
+							},
+							Key: strings.Split(env.SecretKey, ":")[1],
+						},
+					},
+				})
+			}
+		}
+	}
+	
+	// 设置存活探针
+	if app.LivenessProbe != nil {
+		container.LivenessProbe = convertProbeConfig(app.LivenessProbe)
+	}
+	
+	// 设置就绪探针
+	if app.ReadinessProbe != nil {
+		container.ReadinessProbe = convertProbeConfig(app.ReadinessProbe)
+	}
+	
+	// 设置启动探针
+	if app.StartupProbe != nil {
+		// 验证探针配置是否完整
+		probe := convertProbeConfig(app.StartupProbe)
+		// 只有当探针有至少一个handler时才设置
+		if probe.HTTPGet != nil || probe.TCPSocket != nil || probe.Exec != nil {
+			container.StartupProbe = probe
+		}
+	}
+	
+	// 设置生命周期钩子
+	if app.Lifecycle != nil {
+		lifecycle := &corev1.Lifecycle{}
+		lifecycleConfigured := false
+		
+		// 启动后钩子
+		if app.Lifecycle.PostStart != nil {
+			handler := convertLifecycleHandler(app.Lifecycle.PostStart)
+			// 只有当handler有至少一个动作配置时才设置
+			if handler.Exec != nil || handler.HTTPGet != nil || handler.TCPSocket != nil {
+				lifecycle.PostStart = handler
+				lifecycleConfigured = true
+			}
+		}
+		
+		// 停止前钩子
+		if app.Lifecycle.PreStop != nil {
+			handler := convertLifecycleHandler(app.Lifecycle.PreStop)
+			// 只有当handler有至少一个动作配置时才设置
+			if handler.Exec != nil || handler.HTTPGet != nil || handler.TCPSocket != nil {
+				lifecycle.PreStop = handler
+				lifecycleConfigured = true
+			}
+		}
+		
+		// 只有至少配置了一个生命周期钩子时才设置
+		if lifecycleConfigured {
+			container.Lifecycle = lifecycle
+		}
+	}
+	
+	// 设置安全上下文
+	if app.SecurityContext != nil {
+		securityContext := &corev1.SecurityContext{}
+		
+		if app.SecurityContext.RunAsUser != nil {
+			securityContext.RunAsUser = app.SecurityContext.RunAsUser
+		}
+		if app.SecurityContext.RunAsGroup != nil {
+			securityContext.RunAsGroup = app.SecurityContext.RunAsGroup
+		}
+		if app.SecurityContext.RunAsNonRoot != nil {
+			securityContext.RunAsNonRoot = app.SecurityContext.RunAsNonRoot
+		}
+		if app.SecurityContext.ReadOnlyRootFilesystem != nil {
+			securityContext.ReadOnlyRootFilesystem = app.SecurityContext.ReadOnlyRootFilesystem
+		}
+		if app.SecurityContext.Privileged != nil {
+			securityContext.Privileged = app.SecurityContext.Privileged
+		}
+		if app.SecurityContext.AllowPrivilegeEscalation != nil {
+			securityContext.AllowPrivilegeEscalation = app.SecurityContext.AllowPrivilegeEscalation
+		}
+		
+		container.SecurityContext = securityContext
+	}
+	
+	// 配置卷挂载
+	var volumes []corev1.Volume
+	
+	if len(app.Volumes) > 0 {
+		for _, vol := range app.Volumes {
+			volume := corev1.Volume{
+				Name: vol.Name,
+			}
+			
+			switch vol.Type {
+			case "configMap":
+				volume.ConfigMap = &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: vol.ConfigMap,
+					},
+				}
+			case "secret":
+				volume.Secret = &corev1.SecretVolumeSource{
+					SecretName: vol.Secret,
+				}
+			case "emptyDir":
+				emptyDir := &corev1.EmptyDirVolumeSource{}
+				if vol.Medium == "Memory" {
+					emptyDir.Medium = corev1.StorageMediumMemory
+				}
+				volume.EmptyDir = emptyDir
+			case "pvc":
+				volume.PersistentVolumeClaim = &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: vol.ClaimName,
+				}
+			case "hostPath":
+				volume.HostPath = &corev1.HostPathVolumeSource{
+					Path: vol.HostPath,
+				}
+			}
+			
+			volumes = append(volumes, volume)
+		}
+	}
+	
+	// 设置卷挂载
+	if len(app.VolumeMounts) > 0 {
+		for _, mount := range app.VolumeMounts {
+			volumeMount := corev1.VolumeMount{
+				Name:      mount.Name,
+				MountPath: mount.MountPath,
+				ReadOnly:  mount.ReadOnly,
+			}
+			
+			if mount.SubPath != "" {
+				volumeMount.SubPath = mount.SubPath
+			}
+			
+			container.VolumeMounts = append(container.VolumeMounts, volumeMount)
+		}
+	}
+	
+	// 处理主机时区同步
+	if app.SyncHostTimezone {
+		// 添加主机时区卷
+		volumes = append(volumes, corev1.Volume{
+			Name: "host-timezone",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/etc/localtime",
+				},
+			},
+		})
+		
+		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+			Name:      "host-timezone",
+			MountPath: "/etc/localtime",
+			ReadOnly:  true,
+		})
+		
+		log.Printf("配置容器同步主机时区")
+	}
+	
+	// 创建Pod调度相关设置
+	var podAffinityTerms []corev1.PodAffinityTerm
+	var podAntiAffinityTerms []corev1.PodAffinityTerm
+	var nodeAffinityPreferred []corev1.PreferredSchedulingTerm
+	var nodeAffinityRequired *corev1.NodeSelector
+	
+	if app.Affinity != nil {
+		// 设置节点亲和性
+		if app.Affinity.NodeAffinity != nil && app.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+			nodeAffinityRequired = convertNodeSelector(app.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
+		}
+		
+		// 设置Pod亲和性
+		if app.Affinity.PodAffinity != nil && len(app.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution) > 0 {
+			for _, term := range app.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution {
+				podAffinityTerms = append(podAffinityTerms, convertPodAffinityTerm(term))
+			}
+		}
+		
+		// 设置Pod反亲和性
+		if app.Affinity.PodAntiAffinity != nil && len(app.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution) > 0 {
+			for _, term := range app.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution {
+				podAntiAffinityTerms = append(podAntiAffinityTerms, convertPodAffinityTerm(term))
+			}
+		}
 	}
 	
 	// 创建或更新 Deployment
@@ -1064,6 +1331,9 @@ func (km *K8sManager) DeployApplication(app *Application) error {
 				"app":        appName,
 				"managed-by": "cloud-deployment-api",
 				"app-id":     app.ID,
+			},
+			Annotations: map[string]string{
+				"cloud-deploy-timestamp": time.Now().Format(time.RFC3339),
 			},
 		},
 		Spec: appsv1.DeploymentSpec{
@@ -1082,30 +1352,111 @@ func (km *K8sManager) DeployApplication(app *Application) error {
 					},
 				},
 				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  appName,
-							Image: image,
-							Ports: []corev1.ContainerPort{
-								{
-									ContainerPort: containerPort,
-								},
-							},
-							Resources: corev1.ResourceRequirements{
-								Requests: corev1.ResourceList{
-									corev1.ResourceCPU:    resource.MustParse("100m"),
-									corev1.ResourceMemory: resource.MustParse("128Mi"),
-								},
-								Limits: corev1.ResourceList{
-									corev1.ResourceCPU:    resource.MustParse("500m"),
-									corev1.ResourceMemory: resource.MustParse("512Mi"),
-								},
-							},
-						},
-					},
+					Containers: []corev1.Container{container},
+					Volumes:    volumes,
 				},
 			},
 		},
+	}
+	
+	// 添加用户自定义标签和注解
+	if app.Labels != nil && len(app.Labels) > 0 {
+		for k, v := range app.Labels {
+			deployment.ObjectMeta.Labels[k] = v
+			deployment.Spec.Template.ObjectMeta.Labels[k] = v
+		}
+	}
+	
+	if app.Annotations != nil && len(app.Annotations) > 0 {
+		if deployment.ObjectMeta.Annotations == nil {
+			deployment.ObjectMeta.Annotations = make(map[string]string)
+		}
+		
+		if deployment.Spec.Template.ObjectMeta.Annotations == nil {
+			deployment.Spec.Template.ObjectMeta.Annotations = make(map[string]string)
+		}
+		
+		for k, v := range app.Annotations {
+			deployment.ObjectMeta.Annotations[k] = v
+			deployment.Spec.Template.ObjectMeta.Annotations[k] = v
+		}
+	}
+	
+	// 设置更新策略
+	if app.UpdateStrategy != "" {
+		if app.UpdateStrategy == "Recreate" {
+			deployment.Spec.Strategy = appsv1.DeploymentStrategy{
+				Type: appsv1.RecreateDeploymentStrategyType,
+			}
+		} else if app.UpdateStrategy == "RollingUpdate" && app.RollingUpdate != nil {
+			// 默认为25%
+			maxUnavailable := app.RollingUpdate.MaxUnavailable
+			maxSurge := app.RollingUpdate.MaxSurge
+			
+			if maxUnavailable == "" {
+				maxUnavailable = "25%"
+			}
+			if maxSurge == "" {
+				maxSurge = "25%"
+			}
+			
+			deployment.Spec.Strategy = appsv1.DeploymentStrategy{
+				Type: appsv1.RollingUpdateDeploymentStrategyType,
+				RollingUpdate: &appsv1.RollingUpdateDeployment{
+					MaxUnavailable: &intstr.IntOrString{Type: intstr.String, StrVal: maxUnavailable},
+					MaxSurge:       &intstr.IntOrString{Type: intstr.String, StrVal: maxSurge},
+				},
+			}
+		}
+	}
+	
+	// 设置节点选择器
+	if app.NodeSelector != nil && len(app.NodeSelector) > 0 {
+		deployment.Spec.Template.Spec.NodeSelector = app.NodeSelector
+	}
+	
+	// 设置容忍
+	if app.Tolerations != nil && len(app.Tolerations) > 0 {
+		tolerations := make([]corev1.Toleration, 0, len(app.Tolerations))
+		for _, t := range app.Tolerations {
+			toleration := corev1.Toleration{
+				Key:      t.Key,
+				Operator: corev1.TolerationOperator(t.Operator),
+				Value:    t.Value,
+				Effect:   corev1.TaintEffect(t.Effect),
+			}
+			tolerations = append(tolerations, toleration)
+		}
+		deployment.Spec.Template.Spec.Tolerations = tolerations
+	}
+	
+	// 设置亲和性
+	if nodeAffinityRequired != nil || len(nodeAffinityPreferred) > 0 || len(podAffinityTerms) > 0 || len(podAntiAffinityTerms) > 0 {
+		affinity := &corev1.Affinity{}
+		
+		// 节点亲和性
+		if nodeAffinityRequired != nil || len(nodeAffinityPreferred) > 0 {
+			affinity.NodeAffinity = &corev1.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: nodeAffinityRequired,
+				PreferredDuringSchedulingIgnoredDuringExecution: nodeAffinityPreferred,
+			}
+		}
+		
+		// Pod亲和性
+		if len(podAffinityTerms) > 0 {
+			affinity.PodAffinity = &corev1.PodAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: podAffinityTerms,
+			}
+		}
+		
+		// Pod反亲和性
+		if len(podAntiAffinityTerms) > 0 {
+			affinity.PodAntiAffinity = &corev1.PodAntiAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: podAntiAffinityTerms,
+			}
+		}
+		
+		deployment.Spec.Template.Spec.Affinity = affinity
 	}
 	
 	log.Printf("创建Deployment: %s/%s", namespace, appName)
@@ -1162,9 +1513,8 @@ func (km *K8sManager) DeployApplication(app *Application) error {
 		},
 	}
 	
-	log.Printf("创建Service: %s/%s", namespace, appName)
-	
 	// 尝试创建Service
+	log.Printf("创建Service: %s/%s", namespace, appName)
 	_, err = client.CoreV1().Services(namespace).Create(context.TODO(), service, metav1.CreateOptions{})
 	if err != nil {
 		if k8serrors.IsAlreadyExists(err) {
@@ -1173,23 +1523,164 @@ func (km *K8sManager) DeployApplication(app *Application) error {
 			_, err = client.CoreV1().Services(namespace).Update(context.TODO(), service, metav1.UpdateOptions{})
 			if err != nil {
 				log.Printf("更新Service失败: %v", err)
-				// 不返回错误，Deployment已经创建成功
-			} else {
-				log.Printf("更新Service成功: %s/%s", namespace, appName)
+				return fmt.Errorf("更新Service失败: %v", err)
 			}
+			log.Printf("更新Service成功: %s/%s", namespace, appName)
 		} else {
 			log.Printf("创建Service失败: %v", err)
-			// 不返回错误，Deployment已经创建成功
+			return fmt.Errorf("创建Service失败: %v", err)
 		}
 	} else {
 		log.Printf("创建Service成功: %s/%s", namespace, appName)
 	}
 	
-	// 更新缓存的客户端
-	km.Clients[app.KubeConfigID] = client
-	
-	log.Printf("应用部署成功: %s (ID: %s)", app.Name, app.ID)
 	return nil
+}
+
+// 将ProbeConfig转换为Kubernetes Probe
+func convertProbeConfig(probeConfig *ProbeConfig) *corev1.Probe {
+	probe := &corev1.Probe{
+		InitialDelaySeconds: int32(probeConfig.InitialDelaySeconds),
+		PeriodSeconds:       int32(probeConfig.PeriodSeconds),
+		TimeoutSeconds:      int32(probeConfig.TimeoutSeconds),
+		FailureThreshold:    int32(probeConfig.FailureThreshold),
+		SuccessThreshold:    int32(probeConfig.SuccessThreshold),
+	}
+	
+	// 设置默认值
+	if probe.PeriodSeconds == 0 {
+		probe.PeriodSeconds = 10
+	}
+	if probe.TimeoutSeconds == 0 {
+		probe.TimeoutSeconds = 1
+	}
+	if probe.FailureThreshold == 0 {
+		probe.FailureThreshold = 3
+	}
+	if probe.SuccessThreshold == 0 {
+		probe.SuccessThreshold = 1
+	}
+	
+	switch probeConfig.ProbeType {
+	case "http":
+		probe.HTTPGet = &corev1.HTTPGetAction{
+			Path:   probeConfig.Path,
+			Port:   intstr.FromInt(probeConfig.Port),
+			Scheme: corev1.URISchemeHTTP,
+		}
+	case "tcp":
+		probe.TCPSocket = &corev1.TCPSocketAction{
+			Port: intstr.FromInt(probeConfig.Port),
+		}
+	case "command":
+		// 解析命令字符串
+		var cmdArray []string
+		
+		// 尝试解析JSON数组
+		if strings.HasPrefix(probeConfig.Command, "[") && strings.HasSuffix(probeConfig.Command, "]") {
+			err := json.Unmarshal([]byte(probeConfig.Command), &cmdArray)
+			if err != nil {
+				// JSON解析失败，尝试以逗号分隔
+				cmdArray = strings.Split(probeConfig.Command, ",")
+				// 清理每个命令
+				for i, cmd := range cmdArray {
+					cmdArray[i] = strings.TrimSpace(cmd)
+				}
+			}
+		} else if strings.Contains(probeConfig.Command, ",") {
+			// 逗号分隔的命令
+			cmdArray = strings.Split(probeConfig.Command, ",")
+			// 清理每个命令
+			for i, cmd := range cmdArray {
+				cmdArray[i] = strings.TrimSpace(cmd)
+			}
+		} else {
+			// 单个命令，包装为shell执行
+			cmdArray = []string{"/bin/sh", "-c", probeConfig.Command}
+		}
+		
+		// 确保命令数组不为空
+		if len(cmdArray) == 0 {
+			cmdArray = []string{"/bin/sh", "-c", "exit 0"}
+		}
+		
+		probe.Exec = &corev1.ExecAction{
+			Command: cmdArray,
+		}
+	}
+	
+	return probe
+}
+
+// 将Handler转换为Kubernetes LifecycleHandler
+func convertLifecycleHandler(handler *Handler) *corev1.LifecycleHandler {
+	lifecycleHandler := &corev1.LifecycleHandler{}
+	
+	if len(handler.Command) > 0 {
+		lifecycleHandler.Exec = &corev1.ExecAction{
+			Command: handler.Command,
+		}
+	} else if handler.Path != "" && handler.Port != 0 {
+		lifecycleHandler.HTTPGet = &corev1.HTTPGetAction{
+			Path:   handler.Path,
+			Port:   intstr.FromInt(handler.Port),
+			Scheme: corev1.URISchemeHTTP,
+		}
+	}
+	
+	return lifecycleHandler
+}
+
+// 将NodeSelector转换为Kubernetes NodeSelector
+func convertNodeSelector(nodeSelector *NodeSelector) *corev1.NodeSelector {
+	if nodeSelector == nil {
+		return nil
+	}
+	
+	k8sNodeSelector := &corev1.NodeSelector{}
+	var nodeSelectorTerms []corev1.NodeSelectorTerm
+	
+	for _, term := range nodeSelector.NodeSelectorTerms {
+		nodeSelectorTerm := corev1.NodeSelectorTerm{}
+		
+		for _, expr := range term.MatchExpressions {
+			nodeSelectorTerm.MatchExpressions = append(nodeSelectorTerm.MatchExpressions, corev1.NodeSelectorRequirement{
+				Key:      expr.Key,
+				Operator: corev1.NodeSelectorOperator(expr.Operator),
+				Values:   expr.Values,
+			})
+		}
+		
+		nodeSelectorTerms = append(nodeSelectorTerms, nodeSelectorTerm)
+	}
+	
+	k8sNodeSelector.NodeSelectorTerms = nodeSelectorTerms
+	return k8sNodeSelector
+}
+
+// 将PodAffinityTerm转换为Kubernetes PodAffinityTerm
+func convertPodAffinityTerm(term PodAffinityTerm) corev1.PodAffinityTerm {
+	k8sTerm := corev1.PodAffinityTerm{
+		TopologyKey: term.TopologyKey,
+	}
+	
+	if term.LabelSelector != nil {
+		labelSelector := &metav1.LabelSelector{
+			MatchLabels: term.LabelSelector.MatchLabels,
+		}
+		
+		for _, expr := range term.LabelSelector.MatchExpressions {
+			labelSelector.MatchExpressions = append(labelSelector.MatchExpressions, metav1.LabelSelectorRequirement{
+				Key:      expr.Key,
+				Operator: metav1.LabelSelectorOperator(expr.Operator),
+				Values:   expr.Values,
+			})
+		}
+		
+		k8sTerm.LabelSelector = labelSelector
+	}
+	
+	return k8sTerm
 }
 
 // GetDeploymentStatus 获取Deployment状态

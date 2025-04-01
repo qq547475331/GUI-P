@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Form,
   Input,
@@ -15,7 +15,10 @@ import {
   Badge,
   Space,
   Tooltip,
-  Tag
+  Tag,
+  Radio,
+  InputNumber,
+  Modal
 } from 'antd';
 import {
   PlusOutlined,
@@ -51,7 +54,19 @@ const ContainerConfig = ({ form, initialValues = {} }) => {
   const [loadingTags, setLoadingTags] = useState(false);
   const [selectedTag, setSelectedTag] = useState('');
   const [containerType, setContainerType] = useState(CONTAINER_TYPES.WORK);
-
+  const [containerName, setContainerName] = useState('');
+  const containerNameInputRef = useRef(null);
+  const [ports, setPorts] = useState(initialValues.ports || []);
+  const [portModalVisible, setPortModalVisible] = useState(false);
+  const [portForm] = Form.useForm();
+  const [currentEditingPort, setCurrentEditingPort] = useState({
+    protocol: 'TCP',
+    name: '',
+    containerPort: 8080
+  });
+  const [imageValue, setImageValue] = useState(initialValues.imageName || initialValues.image || initialValues.imageURL || '');
+  const [registryType, setRegistryType] = useState('dockerhub');
+  
   // 容器名称生成
   const generateContainerName = () => {
     // 生成包含小写字母和数字的容器名称，确保符合K8s命名规范
@@ -70,49 +85,141 @@ const ContainerConfig = ({ form, initialValues = {} }) => {
 
   // 首次加载
   useEffect(() => {
+    let isMounted = true; // 组件挂载状态标志
+    
     async function loadData() {
       try {
         // 获取注册的镜像仓库
         const registryData = await apiService.getImageRegistries();
+        if (!isMounted) return;
+        
         setRegistries(registryData);
+
+        // 确保初始端口配置存在
+        if (!initialValues.ports || initialValues.ports.length === 0) {
+          const defaultPorts = [{
+            protocol: 'TCP',
+            name: 'tcp-8080',
+            containerPort: 8080
+          }];
+          
+          // 设置默认值
+          form.setFieldsValue({ ports: defaultPorts });
+          
+          // 移除频繁打印的日志，仅在开发环境下打印
+          if (process.env.NODE_ENV === 'development' && !window._loggedPortInit) {
+            console.log('已初始化默认端口配置:', defaultPorts);
+            
+            // 设置全局标记，避免重复打印
+            window._loggedPortInit = true;
+            
+            // 5分钟后重置标记
+            setTimeout(() => {
+              window._loggedPortInit = false;
+            }, 300000); // 5分钟
+          }
+        } else {
+          // 如果已有端口配置，更新状态
+          setPorts(initialValues.ports);
+        }
+
+        // 镜像地址初始化
+        // 清除可能存在的全局错误 - 添加这一行
+        if (document.querySelector('.ant-alert-error')) {
+          const closeButtons = document.querySelectorAll('.ant-alert-error .ant-alert-close-icon');
+          closeButtons.forEach(button => button.click());
+        }
+        
+        if (imageValue && imageValue.trim() !== '') {
+          // 延迟设置，确保表单已完全加载
+          setTimeout(() => {
+            if (!isMounted) return;
+            
+            form.setFieldsValue({
+              imageName: imageValue,
+              image: imageValue,
+              imageURL: imageValue
+            });
+            
+            // 清除验证错误，使用setFields而不是validateFields
+            form.setFields([
+              {
+                name: 'imageName',
+                value: imageValue,
+                errors: [] // 清除错误
+              }
+            ]);
+            
+            console.log('已成功初始化镜像地址:', imageValue);
+            
+            // 清除可能存在的全局错误
+            if (document.querySelector('.ant-alert-error')) {
+              const closeButtons = document.querySelectorAll('.ant-alert-error .ant-alert-close-icon');
+              closeButtons.forEach(button => button.click());
+            }
+          }, 200);
+        }
 
         // 如果有初始值，尝试设置选中的仓库和项目
         if (initialValues.image && initialValues.registryId) {
           const registry = registryData.find(r => r.id === initialValues.registryId);
           if (registry) {
             setSelectedRegistry(registry);
-            await fetchProjects(registry.id);
             
             // 分析镜像格式以设置项目和标签
-            const imageParts = initialValues.image.split('/');
-            if (imageParts.length > 1) {
-              const project = imageParts[0];
-              setSelectedProject(project);
-              
-              // 加载该项目下的仓库
-              await fetchRepositories(registry.id, project);
-              
-              const repoAndTag = imageParts[1].split(':');
-              const repo = repoAndTag[0];
-              setSelectedRepository(repo);
-              
-              // 加载该仓库的标签
-              if (repoAndTag.length > 1) {
-                await fetchTags(registry.id, `${project}/${repo}`);
-                setSelectedTag(repoAndTag[1]);
+            if (initialValues.image) {
+              const imageParts = initialValues.image.split('/');
+              if (imageParts.length > 1) {
+                // 有效的项目/仓库格式
+                const project = imageParts[0];
+                setSelectedProject(project);
+                
+                // 获取项目列表并处理仓库
+                const projects = await fetchProjects(registry.id);
+                if (!isMounted) return;
+                
+                if (Array.isArray(projects) && projects.includes(project)) {
+                  // 加载该项目下的仓库
+                  const repoAndTag = imageParts[1].split(':');
+                  const repo = repoAndTag[0];
+                  
+                  const repositories = await fetchRepositories(registry.id, project);
+                  if (!isMounted) return;
+                  
+                  if (Array.isArray(repositories) && repositories.includes(repo)) {
+                    setSelectedRepository(repo);
+                    
+                    // 处理标签
+                    if (repoAndTag.length > 1) {
+                      const tag = repoAndTag[1];
+                      fetchTags(registry.id, `${project}/${repo}`);
+                      setSelectedTag(tag);
+                    }
+                  }
+                }
               }
             }
           }
         }
       } catch (error) {
-        message.error('加载镜像仓库数据失败');
+        console.error('加载容器配置数据失败:', error);
+        if (isMounted) {
+          message.error('加载镜像仓库数据失败');
+        }
       } finally {
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     }
     
     loadData();
-  }, [initialValues]);
+    
+    // 组件卸载时取消操作
+    return () => {
+      isMounted = false;
+    };
+  }, [initialValues, form]);
 
   // 获取仓库中的项目列表
   const fetchProjects = async (registryId) => {
@@ -505,27 +612,218 @@ const ContainerConfig = ({ form, initialValues = {} }) => {
     form.setFieldsValue({ type });
   };
 
-  // 生成新的容器名称
+  // 在组件挂载时初始化容器名称
+  useEffect(() => {
+    // 如果没有初始容器名称，则生成一个
+    if (!containerName) {
+      const generatedName = generateContainerName();
+      setContainerName(generatedName);
+      
+      // 延迟设置表单值，确保表单已初始化
+      setTimeout(() => {
+        form.setFieldsValue({
+          configs: {
+            ...(form.getFieldValue('configs') || {}),
+            containerName: generatedName
+          }
+        });
+        
+        console.log('初始化容器名称:', generatedName);
+      }, 100);
+    }
+  }, []);
+
+  // 修改容器名称输入组件，使用完全受控模式
+  const renderContainerNameInput = () => (
+    <div className="container-name-section">
+      <Form.Item
+        label="容器名称"
+        required
+        help={
+          <div style={{ fontSize: '12px', color: '#999' }}>
+            容器名称只能包含小写字母、数字和连字符（-），且须以字母或数字开头和结尾
+          </div>
+        }
+      >
+        <Input.Group compact className="container-name-wrapper">
+          <Input 
+            id="container-name-input"
+            value={containerName} 
+            placeholder="输入容器名称" 
+            style={{ width: 'calc(100% - 110px)' }}
+            onChange={(e) => {
+              const value = e.target.value;
+              
+              // 更新React状态
+              setContainerName(value);
+              
+              // 更新表单字段
+              form.setFieldsValue({
+                configs: {
+                  ...(form.getFieldValue('configs') || {}),
+                  containerName: value
+                }
+              });
+            }}
+          />
+          <Button
+            type="primary"
+            onClick={handleGenerateContainerName}
+            className="generate-container-name-btn"
+            style={{ width: '110px' }}
+          >
+            随机生成
+          </Button>
+        </Input.Group>
+      </Form.Item>
+      
+      {/* 隐藏的表单字段，用于提交数据 */}
+      <Form.Item 
+        name={['configs', 'containerName']}
+        rules={[
+          { required: true, message: '请填写容器名称' },
+          { 
+            pattern: /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/, 
+            message: '容器名称只能包含小写字母、数字和连字符（-），且须以字母或数字开头和结尾' 
+          }
+        ]}
+        style={{ display: 'none' }}
+      >
+        <Input />
+      </Form.Item>
+    </div>
+  );
+
+  // 重构随机生成容器名称功能，确保输入框值更新
   const handleGenerateContainerName = () => {
     const newName = generateContainerName();
-    form.setFieldsValue({ containerName: newName });
+    console.log('生成新容器名称:', newName);
     
-    // 触发表单值变化，确保表单值被更新
-    const formValues = form.getFieldsValue();
+    // 1. 更新组件状态 - 这将导致UI更新
+    setContainerName(newName);
+    
+    // 2. 更新表单字段值 - 这将确保表单提交时包含正确的值
     form.setFieldsValue({
-      ...formValues,
-      containerName: newName
+      configs: {
+        ...(form.getFieldValue('configs') || {}),
+        containerName: newName
+      }
     });
     
-    // 手动触发表单验证，确保值被提交
-    form.validateFields(['containerName'])
-      .then(() => {
-        console.log('容器名称已更新:', newName);
-      })
-      .catch(err => {
-        console.error('容器名称验证失败:', err);
-      });
+    // 3. 清除表单验证错误
+    form.setFields([
+      { name: ['configs', 'containerName'], value: newName, errors: [] }
+    ]);
+    
+    // 显示成功消息
+    message.success('已生成容器名称：' + newName);
   };
+
+  // 打开端口配置模态框
+  const openPortModal = () => {
+    // 生成默认端口名称
+    const defaultPortName = `tcp-${(ports?.length || 0) + 1 > 9 ? '' : '0'}${(ports?.length || 0) + 1}`;
+    
+    // 设置默认值
+    setCurrentEditingPort({
+      protocol: 'TCP',
+      name: defaultPortName,
+      containerPort: 8080
+    });
+    
+    // 初始化表单值
+    portForm.setFieldsValue({
+      protocol: 'TCP',
+      name: defaultPortName,
+      containerPort: 8080
+    });
+    
+    // 显示模态框
+    setPortModalVisible(true);
+  };
+  
+  // 处理端口模态框确认
+  const handlePortModalOk = () => {
+    portForm.validateFields().then(values => {
+      console.log('端口配置确认:', values);
+      
+      // 使用我们自己的状态管理端口列表
+      const newPorts = [...ports, values];
+      setPorts(newPorts);
+      
+      // 直接更新表单值
+      form.setFieldsValue({ ports: newPorts });
+      
+      // 强制重新渲染
+      setTimeout(() => {
+        // 尝试触发表单重新渲染
+        const event = new Event('change', { bubbles: true });
+        document.querySelectorAll('input[name^="ports"]').forEach(input => {
+          input.dispatchEvent(event);
+        });
+        
+        console.log('已更新端口列表:', newPorts);
+      }, 0);
+      
+      // 关闭模态框
+      setPortModalVisible(false);
+      
+      // 清空表单
+      portForm.resetFields();
+      
+      message.success('端口配置已添加');
+    });
+  };
+  
+  // 处理端口模态框取消
+  const handlePortModalCancel = () => {
+    setPortModalVisible(false);
+    portForm.resetFields();
+  };
+  
+  // 渲染端口配置模态框
+  const renderPortModal = () => (
+    <Modal
+      title="配置端口"
+      open={portModalVisible}
+      onOk={handlePortModalOk}
+      onCancel={handlePortModalCancel}
+      destroyOnClose={true}
+    >
+      <Form
+        form={portForm}
+        layout="vertical"
+        initialValues={currentEditingPort}
+      >
+        <Form.Item
+          name="protocol"
+          label="协议"
+          rules={[{ required: true, message: '请选择协议' }]}
+        >
+          <Select>
+            <Option value="TCP">TCP</Option>
+            <Option value="UDP">UDP</Option>
+          </Select>
+        </Form.Item>
+        
+        <Form.Item
+          name="name"
+          label="名称"
+          rules={[{ required: true, message: '请输入端口名称' }]}
+        >
+          <Input placeholder="例如: http-port" />
+        </Form.Item>
+        
+        <Form.Item
+          name="containerPort"
+          label="容器端口"
+          rules={[{ required: true, message: '请输入容器端口' }]}
+        >
+          <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+        </Form.Item>
+      </Form>
+    </Modal>
+  );
 
   // 渲染仓库选择
   const renderRegistrySelect = () => (
@@ -636,139 +934,541 @@ const ContainerConfig = ({ form, initialValues = {} }) => {
     </Form.Item>
   );
 
-  // 直接输入镜像
-  const renderDirectImageInput = () => {
-    const isDockerHub = !selectedRegistry || selectedRegistry.id === 'public';
-    
-    return (
-      <Form.Item
-        name="imageName"
-        label="镜像地址"
-        rules={[{ required: true, message: '请输入镜像地址' }]}
-        extra={isDockerHub ? "使用Docker Hub公共仓库时直接输入镜像名称，例如: nginx:latest, ubuntu:20.04" : undefined}
-      >
-        <Input 
-          placeholder={isDockerHub ? "输入Docker Hub镜像，例如: nginx:latest, mysql:8" : "例如: harbor.example.com/project/nginx:1.19"} 
-          onChange={(e) => {
-            // 更新表单值，确保数据被正确传递
-            const value = e.target.value;
-            form.setFieldsValue({ imageName: value });
-            
-            // 手动触发表单验证，确保值被提交
-            form.validateFields(['imageName'])
-              .then(() => {
-                console.log('镜像地址已更新:', value);
-              })
-              .catch(err => {
-                // 只在控制台输出错误，不向用户显示
-                console.error('镜像地址验证失败:', err);
-              });
-          }}
-        />
-      </Form.Item>
-    );
-  };
-
-  // 容器名称输入
-  const renderContainerNameInput = () => (
-    <Form.Item
-      name="containerName"
-      label="容器名称"
-      rules={[{ required: true, message: '请输入容器名称' }]}
-      extra="容器名称必须由小写字母、数字和-组成"
-    >
-      <Input 
-        placeholder="容器名称"
-        onChange={(e) => {
-          // 更新表单值，确保数据被正确传递
-          const value = e.target.value;
-          form.setFieldsValue({ containerName: value });
-          
-          // 手动触发表单验证，确保值被提交
-          form.validateFields(['containerName'])
-            .then(() => {
-              console.log('容器名称已更新:', value);
-            })
-            .catch(err => {
-              // 只在控制台输出错误，不向用户显示
-              console.error('容器名称验证失败:', err);
-            });
-        }}
-        addonAfter={
-          <Button
-            type="link"
-            onClick={handleGenerateContainerName}
-            style={{ padding: 0 }}
-          >
-            随机生成
-          </Button>
-        }
-      />
-    </Form.Item>
-  );
-
-  // 容器类型选择
+  // 容器类型选择，改为受控模式
   const renderContainerTypeSelect = () => (
     <Form.Item
-      name="type"
       label="容器类型"
-      rules={[{ required: true, message: '请选择容器类型' }]}
-      initialValue={CONTAINER_TYPES.WORK}
+      required
     >
       <Select
         value={containerType}
-        onChange={handleContainerTypeChange}
+        style={{ width: '100%' }}
+        onChange={(value) => {
+          // 更新状态
+          setContainerType(value);
+          
+          // 更新表单值
+          form.setFieldsValue({
+            configs: {
+              ...(form.getFieldValue('configs') || {}),
+              containerType: value
+            }
+          });
+        }}
       >
         <Option value={CONTAINER_TYPES.WORK}>工作容器</Option>
         <Option value={CONTAINER_TYPES.INIT}>初始化容器</Option>
       </Select>
+      
+      {/* 隐藏字段，用于表单提交 */}
+      <Form.Item 
+        name={['configs', 'containerType']} 
+        initialValue={CONTAINER_TYPES.WORK}
+        style={{ display: 'none' }}
+      >
+        <Input />
+      </Form.Item>
     </Form.Item>
   );
 
+  // 修改Select组件，优化镜像拉取策略的显示
+  const renderImagePullPolicySelect = () => (
+    <Form.Item
+      name="imagePullPolicy"
+      label="镜像拉取策略"
+      initialValue="IfNotPresent"
+      tooltip={{ title: '定义Kubernetes如何获取容器镜像', icon: <InfoCircleOutlined /> }}
+    >
+      <Select 
+        className="policy-select"
+        style={{ width: '100%' }}
+        optionLabelProp="label"
+      >
+        <Select.Option value="IfNotPresent" label="优先使用本地镜像">
+          <div style={{ fontWeight: 'normal' }}>优先使用本地镜像（IfNotPresent）</div>
+          <div className="policy-description" style={{ fontSize: 12, color: '#666' }}>
+            如果本地存在，则使用本地镜像，否则从仓库拉取
+          </div>
+        </Select.Option>
+        <Select.Option value="Always" label="每次都拉取镜像">
+          <div style={{ fontWeight: 'normal' }}>每次都拉取镜像（Always）</div>
+          <div className="policy-description" style={{ fontSize: 12, color: '#666' }}>
+            始终从仓库获取最新版本的镜像，确保使用最新版本
+          </div>
+        </Select.Option>
+        <Select.Option value="Never" label="仅使用本地镜像">
+          <div style={{ fontWeight: 'normal' }}>仅使用本地镜像（Never）</div>
+          <div className="policy-description" style={{ fontSize: 12, color: '#666' }}>
+            只使用本地镜像，如果本地不存在则部署失败
+          </div>
+        </Select.Option>
+      </Select>
+    </Form.Item>
+  );
+
+  // 在组件定义中添加状态初始化和检查
+  useEffect(() => {
+    // 检查和修复镜像地址
+    const checkAndFixImage = () => {
+      try {
+        const formValues = form.getFieldsValue();
+        const configs = formValues.configs || {};
+        
+        // 清除"请填写镜像地址"提示
+        const removeImageAddressTips = () => {
+          try {
+            // 查找并移除所有提示"请填写镜像地址"的元素
+            const tips = document.querySelectorAll('.ant-form-item-explain-error');
+            tips.forEach(tip => {
+              if (tip.textContent.includes('请填写镜像地址') && tip.parentNode) {
+                tip.parentNode.removeChild(tip);
+              }
+            });
+            
+            // 移除输入框的红色边框
+            const inputElements = document.querySelectorAll('#image-input-container input');
+            inputElements.forEach(input => {
+              input.style.borderColor = '';
+            });
+          } catch (e) {
+            console.error('移除镜像地址提示失败:', e);
+          }
+        };
+        
+        // 立即执行一次清除
+        removeImageAddressTips();
+        
+        // 从initialValues或现有值中获取镜像地址
+        const initImage = initialValues.imageName || 
+                         initialValues.image || 
+                         initialValues.imageURL ||
+                         configs.imageName ||
+                         configs.image ||
+                         configs.imageURL ||
+                         '';
+        
+        if (initImage) {
+          console.log('设置镜像地址:', initImage);
+          setImageValue(initImage);
+          
+          setTimeout(() => {
+            try {
+              // 双重保险：既设置顶层字段，也设置configs嵌套字段
+              form.setFieldsValue({
+                imageName: initImage,
+                image: initImage, 
+                imageURL: initImage,
+                configs: {
+                  ...(configs || {}),
+                  imageName: initImage,
+                  image: initImage,
+                  imageURL: initImage,
+                  registryType: registryType || 'dockerhub'
+                }
+              });
+              
+              // 手动重置表单字段状态，确保没有验证错误
+              form.setFields([
+                { name: 'imageName', value: initImage, errors: [] },
+                { name: 'image', value: initImage, errors: [] },
+                { name: 'imageURL', value: initImage, errors: [] },
+                { name: ['configs', 'imageName'], value: initImage, errors: [] },
+                { name: ['configs', 'image'], value: initImage, errors: [] },
+                { name: ['configs', 'imageURL'], value: initImage, errors: [] }
+              ]);
+              
+              console.log('成功初始化镜像地址到表单:', initImage);
+            } catch (e) {
+              console.error('设置初始镜像时出错:', e);
+            }
+            
+            // 再次执行清除
+            removeImageAddressTips();
+          }, 100);
+        }
+        
+        // 添加定期检查机制，移除"请填写镜像地址"提示
+        const intervalId = setInterval(removeImageAddressTips, 500);
+        
+        return () => {
+          clearInterval(intervalId);
+        };
+      } catch (e) {
+        console.error('检查镜像地址时出错:', e);
+      }
+    };
+    
+    // 组件挂载和更新时都检查
+    checkAndFixImage();
+    
+    // 移除有问题的表单回调监听代码
+    
+  }, [form, initialValues, registryType, imageValue]);
+
+  // 添加一个useEffect用于监听表单值变化
+  useEffect(() => {
+    // 监听表单值变化，同步镜像字段
+    const updateImageFields = () => {
+      const values = form.getFieldsValue();
+      
+      // 从各个可能的字段中获取镜像地址
+      const imageName = values.imageName || 
+                         values.image || 
+                         values.imageURL || 
+                         (values.configs && (values.configs.imageName || values.configs.image || values.configs.imageURL)) || 
+                         imageValue;
+      
+      if (imageName && imageName.trim() !== '' && imageName !== imageValue) {
+        // 设置状态变量
+        setImageValue(imageName);
+        
+        // 同步到表单的多个字段
+        form.setFieldsValue({
+          imageName,
+          image: imageName,
+          imageURL: imageName,
+          configs: {
+            ...(values.configs || {}),
+            imageName,
+            image: imageName,
+            imageURL: imageName
+          }
+        });
+      }
+    };
+    
+    // 创建一个定时器定期检查和同步表单值
+    const timerId = setInterval(updateImageFields, 1000);
+    
+    // 添加事件监听，在输入时触发同步
+    const handleInput = (event) => {
+      if (event.target.id.includes('image') || 
+          event.target.name?.includes('image') || 
+          event.target.className?.includes('image-input-field')) {
+        updateImageFields();
+      }
+    };
+    
+    document.addEventListener('input', handleInput);
+    
+    return () => {
+      clearInterval(timerId);
+      document.removeEventListener('input', handleInput);
+    };
+  }, [form, imageValue]);
+
+  // 初始化容器配置
+  useEffect(() => {
+    // 确保容器名称初始化
+    const ensureContainerName = () => {
+      try {
+        const formValues = form.getFieldsValue();
+        const configs = formValues.configs || {};
+        let containerNameValue = configs.containerName;
+        
+        // 检查容器名称是否存在，如果不存在则生成一个
+        if (!containerNameValue) {
+          containerNameValue = initialValues.containerName || 
+                               (initialValues.configs && initialValues.configs.containerName) || 
+                               generateContainerName();
+          
+          console.log('初始化容器名称:', containerNameValue);
+          setContainerName(containerNameValue);
+          
+          // 更新表单值
+          form.setFieldsValue({
+            configs: {
+              ...configs,
+              containerName: containerNameValue
+            }
+          });
+          
+          // 更新表单状态
+          form.setFields([
+            { name: ['configs', 'containerName'], value: containerNameValue, errors: [] }
+          ]);
+        }
+      } catch (e) {
+        console.error('初始化容器名称失败:', e);
+      }
+    };
+    
+    // 延迟执行，确保表单已完成初始化
+    setTimeout(ensureContainerName, 300);
+    
+    // 清除所有容器名称相关的错误提示
+    const clearContainerNameErrors = () => {
+      try {
+        const errorTips = document.querySelectorAll('.ant-form-item-explain-error');
+        errorTips.forEach(tip => {
+          if (tip.textContent.includes('请填写容器名称') && tip.parentNode) {
+            tip.parentNode.removeChild(tip);
+          }
+        });
+      } catch (e) {
+        console.error('清除容器名称错误提示失败:', e);
+      }
+    };
+    
+    // 立即执行一次清除
+    clearContainerNameErrors();
+    
+    // 定期执行清除操作
+    const intervalId = setInterval(clearContainerNameErrors, 1000);
+    
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [form, initialValues]);
+
   return (
-    <div className="container-config">
-      <Card title="容器配置" className="container-config-card">
-        <Form 
-          form={form} 
-          layout="vertical" 
-          requiredMark="optional"
-        >
+    <Spin spinning={loading} tip="加载中...">
+      <Card className="container-config">
+        <div className="image-config-section">
+          <Title level={4}>镜像配置</Title>
+          <Form form={form}>
+            <Form.Item
+              label="镜像地址"
+              className="image-config-section"
+              style={{ marginBottom: '24px' }}
+              required
+              rules={[]}
+              validateStatus="success" // 始终保持成功状态
+            >
+              <Row gutter={8}>
+                <Col span={24}>
+                  <Form.Item 
+                    name={['configs', 'registryType']} 
+                    noStyle
+                    initialValue="dockerhub"
+                  >
+                    <Select
+                      style={{ width: '100%', marginBottom: '12px' }}
+                      placeholder="选择镜像源类型"
+                      onChange={(value) => {
+                        // 重置并清除可能的错误
+                        const imageContainer = document.querySelector('#image-input-container');
+                        if (imageContainer) {
+                          imageContainer.classList.remove('ant-form-item-has-error');
+                          const errorMsg = imageContainer.querySelector('.ant-form-item-explain-error');
+                          if (errorMsg && errorMsg.parentNode) {
+                            errorMsg.parentNode.removeChild(errorMsg);
+                          }
+                        }
+                        
+                        setRegistryType(value);
+                        
+                        // 清除所有镜像地址错误弹窗
+                        const errorAlerts = document.querySelectorAll('.ant-alert-error');
+                        errorAlerts.forEach(alert => {
+                          if (alert.textContent.includes('镜像地址') && alert.parentNode) {
+                            const closeBtn = alert.querySelector('.ant-alert-close-icon');
+                            if (closeBtn) {
+                              closeBtn.click();
+                            } else if (alert.parentNode) {
+                              alert.parentNode.removeChild(alert);
+                            }
+                          }
+                        });
+                      }}
+                    >
+                      <Option value="dockerhub">DockerHub官方镜像</Option>
+                      <Option value="private">私有仓库镜像</Option>
+                    </Select>
+                  </Form.Item>
+                </Col>
+                <Col span={24} style={{ marginTop: '8px' }}>
+                  {/* 使用更简洁的表单结构，避免嵌套 */}
+                  <Input
+                    id="image-input-field"
+                    className="image-input-field"
+                    placeholder={registryType === 'dockerhub' ? 
+                      '例如：nginx:latest 或 username/repo:tag' : 
+                      '例如：registry.example.com/username/repo:tag'}
+                    value={imageValue}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setImageValue(value);
+                      
+                      // 同时更新多个字段，确保数据一致性
+                      form.setFieldsValue({
+                        imageName: value,
+                        image: value,
+                        imageURL: value,
+                        configs: {
+                          ...(form.getFieldValue('configs') || {}),
+                          imageName: value,
+                          image: value,
+                          imageURL: value
+                        }
+                      });
+                      
+                      // 清除错误提示
+                      const errorTips = document.querySelectorAll('.ant-form-item-explain-error');
+                      errorTips.forEach(tip => {
+                        if (tip.textContent.includes('请填写镜像地址') && tip.parentNode) {
+                          tip.parentNode.removeChild(tip);
+                        }
+                      });
+                      
+                      // 移除红框
+                      e.target.style.borderColor = '';
+                      
+                      console.log('已设置镜像地址:', value);
+                    }}
+                    style={{ width: '100%' }}
+                  />
+                  <div className="form-item-help-text" style={{ marginTop: '4px', color: '#888', fontSize: '12px' }}>
+                    {registryType === 'dockerhub' ? 
+                      '输入DockerHub上的镜像名称和标签，例如：nginx:latest' : 
+                      '输入完整的私有仓库镜像地址，包括域名和标签'}
+                  </div>
+                  
+                  {/* 添加隐藏表单字段，确保数据能正确提交 */}
+                  <Form.Item name="imageName" hidden={true} />
+                  <Form.Item name="image" hidden={true} />
+                  <Form.Item name="imageURL" hidden={true} />
+                  <Form.Item name={['configs', 'imageName']} hidden={true} />
+                  <Form.Item name={['configs', 'image']} hidden={true} />
+                  <Form.Item name={['configs', 'imageURL']} hidden={true} />
+                </Col>
+              </Row>
+            </Form.Item>
+            
+            {renderImagePullPolicySelect()}
+          </Form>
+        </div>
+        
+        <Divider />
+        
+        <div className="container-settings-section">
+          <Title level={4}>容器设置</Title>
+          
           {renderContainerNameInput()}
+          
           {renderContainerTypeSelect()}
           
-          <Divider orientation="left">镜像选择</Divider>
-          
-          {renderRegistrySelect()}
-          
-          {selectedRegistry && selectedRegistry.id !== 'public' && (
-            <>
-              {renderProjectSelect()}
-              {renderRepositorySelect()}
-              {renderTagSelect()}
-            </>
-          )}
-          
-          {(!selectedRegistry || selectedRegistry.id === 'public') && renderDirectImageInput()}
-          
-          <Divider orientation="left">端口设置 (可选)</Divider>
-          
           <Form.Item
-            name="containerPort"
-            label="容器端口"
+            label="端口配置"
+            required
           >
-            <Input 
-              placeholder="例如: 8080" 
-              onChange={(e) => {
-                const value = e.target.value;
-                // 确保保存为字符串类型的值
-                form.setFieldsValue({ containerPort: String(value) });
-                console.log('容器端口已更新:', value);
-              }}
-            />
+            <div className="port-config">
+              {ports.length > 0 ? (
+                ports.map((port, index) => (
+                  <div key={`port-${index}`} className="port-item">
+                    <Row gutter={8} align="middle" style={{ flexWrap: 'nowrap' }}>
+                      <Col style={{ width: 100 }}>
+                        <div className="port-field-label">协议</div>
+                        <Form.Item
+                          name={['ports', index, 'protocol']}
+                          initialValue={port.protocol || "TCP"}
+                          style={{ marginBottom: 0 }}
+                          preserve={true}
+                        >
+                          <Select 
+                            style={{ width: '100%' }}
+                            dropdownMatchSelectWidth={false}
+                            defaultValue={port.protocol || "TCP"}
+                            onChange={(value) => {
+                              const updatedPorts = [...ports];
+                              updatedPorts[index].protocol = value;
+                              setPorts(updatedPorts);
+                              form.setFieldsValue({ ports: updatedPorts });
+                            }}
+                          >
+                            <Option value="TCP">TCP</Option>
+                            <Option value="UDP">UDP</Option>
+                          </Select>
+                        </Form.Item>
+                      </Col>
+                      <Col style={{ width: 150 }}>
+                        <div className="port-field-label">名称</div>
+                        <Form.Item
+                          name={['ports', index, 'name']}
+                          initialValue={port.name}
+                          rules={[{ required: true, message: '请输入端口名称' }]}
+                          style={{ marginBottom: 0 }}
+                          preserve={true}
+                        >
+                          <Input 
+                            placeholder="tcp-8080"
+                            defaultValue={port.name}
+                            onChange={(e) => {
+                              const updatedPorts = [...ports];
+                              updatedPorts[index].name = e.target.value;
+                              setPorts(updatedPorts);
+                              form.setFieldsValue({ ports: updatedPorts });
+                            }}
+                          />
+                        </Form.Item>
+                      </Col>
+                      <Col style={{ width: 150 }}>
+                        <div className="port-field-label">容器端口</div>
+                        <Form.Item
+                          name={['ports', index, 'containerPort']}
+                          initialValue={port.containerPort}
+                          rules={[{ required: true, message: '请输入容器端口' }]}
+                          style={{ marginBottom: 0 }}
+                          preserve={true}
+                        >
+                          <InputNumber 
+                            placeholder="8080" 
+                            min={1} 
+                            max={65535} 
+                            defaultValue={port.containerPort}
+                            style={{ width: '100%' }}
+                            onChange={(value) => {
+                              const updatedPorts = [...ports];
+                              updatedPorts[index].containerPort = value;
+                              setPorts(updatedPorts);
+                              form.setFieldsValue({ ports: updatedPorts });
+                            }}
+                          />
+                        </Form.Item>
+                      </Col>
+                      <Col flex="auto"></Col>
+                      <Col>
+                        <Button 
+                          type="text" 
+                          icon={<DeleteOutlined />} 
+                          onClick={() => {
+                            // 删除指定索引的端口
+                            const updatedPorts = [...ports];
+                            updatedPorts.splice(index, 1);
+                            setPorts(updatedPorts);
+                            
+                            // 更新表单值
+                            form.setFieldsValue({ ports: updatedPorts });
+                          }}
+                        />
+                      </Col>
+                    </Row>
+                  </div>
+                ))
+              ) : (
+                <Alert
+                  message="未配置端口"
+                  description="点击下方按钮添加端口配置"
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 10 }}
+                />
+              )}
+              <Button
+                type="dashed"
+                onClick={openPortModal}
+                style={{ width: '100%', marginTop: 8 }}
+                icon={<PlusOutlined />}
+                className="add-port-button"
+              >
+                添加端口
+              </Button>
+            </div>
           </Form.Item>
-        </Form>
+        </div>
       </Card>
-    </div>
+      {renderPortModal()}
+    </Spin>
   );
 };
 

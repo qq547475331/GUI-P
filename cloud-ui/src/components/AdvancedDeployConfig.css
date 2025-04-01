@@ -1,0 +1,57 @@
+.advanced-deploy-config {
+  margin-bottom: 20px;
+}
+
+.advanced-deploy-config .ant-collapse-header {
+  font-weight: 500;
+}
+
+.advanced-deploy-config .probe-config {
+  padding-left: 12px;
+  border-left: 1px solid #f0f0f0;
+  margin-top: 15px;
+}
+
+.advanced-deploy-config .option-desc {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.advanced-deploy-config .update-config-form {
+  margin-top: 15px;
+  padding: 15px;
+  background-color: #fafafa;
+  border-radius: 4px;
+}
+
+.advanced-deploy-config .command-config {
+  margin-top: 15px;
+  padding-left: 12px;
+  border-left: 1px solid #f0f0f0;
+}
+
+.advanced-deploy-config .volume-card {
+  background-color: #fafafa;
+}
+
+.advanced-deploy-config .timezone-info {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  margin-top: 8px;
+  padding: 8px;
+  background-color: #f5f5f5;
+  border-radius: 4px;
+}
+
+.advanced-deploy-config .ant-input-number {
+  width: 100%;
+}
+
+.advanced-deploy-config .ant-collapse-ghost > .ant-collapse-item > .ant-collapse-content > .ant-collapse-content-box {
+  padding-left: 16px;
+}
+
+.advanced-deploy-config .ant-form-item-extra {
+  font-size: 12px;
+} 

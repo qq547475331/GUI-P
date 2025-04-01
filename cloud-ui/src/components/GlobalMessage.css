@@ -1,0 +1,115 @@
+.global-success-message {
+  background-color: #f6ffed;
+  border: 1px solid #b7eb8f;
+  color: #52c41a;
+  border-radius: 4px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  line-height: 1.5;
+  display: flex;
+  align-items: center;
+}
+
+.global-success-message .anticon {
+  margin-right: 8px;
+  font-size: 16px;
+  color: #52c41a;
+}
+
+.global-success-message.with-link {
+  cursor: pointer;
+}
+
+.global-success-message.with-link:hover {
+  background-color: #eaffda;
+}
+
+/* 应用创建成功提示样式 */
+.app-created-message {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  box-shadow: 0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 6px 16px 0 rgba(0, 0, 0, 0.08);
+  min-width: 300px;
+  animation: bounceIn 0.5s;
+}
+
+/* 确保应用创建成功消息使用绿色√图标 */
+.app-created-message .anticon-close-circle,
+.app-created-message .anticon-exclamation-circle,
+.app-created-message .anticon-close {
+  display: none !important;
+}
+
+.app-created-message .ant-message-custom-content .anticon {
+  color: #52c41a !important;
+}
+
+.app-created-message::before {
+  content: '';
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><path fill="%2352c41a" d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm193.5 301.7l-210.6 292a31.8 31.8 0 01-51.7 0L318.5 484.9c-3.8-5.3 0-12.7 6.5-12.7h46.9c10.2 0 19.9 4.9 25.9 13.3l71.2 98.8 157.2-218c6-8.3 15.6-13.3 25.9-13.3H699c6.5 0 10.3 7.4 6.5 12.7z"/></svg>');
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+@keyframes bounceIn {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.8);
+  }
+  70% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1.05);
+  }
+  100% {
+    transform: translateX(-50%) scale(1);
+  }
+}
+
+/* 调整成功提示消息样式 */
+.ant-message-success .ant-message-custom-content {
+  color: #52c41a !important;
+}
+
+.ant-message-success {
+  background-color: #f6ffed !important;
+  border: 1px solid #b7eb8f !important;
+  border-radius: 4px !important;
+  padding: 10px 16px !important;
+  box-shadow: 0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 6px 16px 0 rgba(0, 0, 0, 0.08) !important;
+}
+
+/* 提高Ant Design消息的优先级 */
+.ant-message-success {
+  z-index: 9999 !important;
+}
+
+/* 调整消息样式 */
+.ant-message-notice-content {
+  padding: 12px 20px !important;
+  box-shadow: 0 3px 6px -4px rgba(0, 0, 0, 0.12), 0 6px 16px 0 rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+}
+
+.ant-message-success .anticon {
+  color: #52c41a !important;
+  font-size: 16px !important;
+}
+
+.ant-message-custom-content {
+  display: flex !important;
+  align-items: center !important;
+}
+
+.ant-message-success span {
+  color: #52c41a !important;
+  font-size: 14px !important;
+} 

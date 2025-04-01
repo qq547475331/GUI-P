@@ -16,7 +16,7 @@ var (
 
 // 数据库连接配置
 const (
-	dbHost     = "192.168.0.61"
+	dbHost     = "192.168.0.65"
 	dbPort     = 30054
 	dbUser     = "admin" 
 	dbPassword = "asd123456"

@@ -21,4 +21,344 @@
 
 .container-config .add-tag-button {
   margin-top: 8px;
+}
+
+.container-config .ant-form-item {
+  margin-bottom: 16px;
+}
+
+.container-config .ant-radio-wrapper {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.container-config .ant-radio-wrapper .ant-radio {
+  margin-top: 3px;
+}
+
+/* 健康检查和生命周期管理配置样式 */
+.health-check-container, .lifecycle-container {
+  margin-top: 16px;
+  margin-bottom: 24px;
+}
+
+.health-check-header, .lifecycle-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.health-check-title, .lifecycle-title {
+  margin-right: 8px;
+  margin-bottom: 0;
+}
+
+.probe-type-select {
+  width: 120px;
+}
+
+.probe-group {
+  margin-bottom: 16px;
+  padding: 16px;
+  background-color: #f9f9f9;
+  border-radius: 4px;
+}
+
+.probe-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.probe-title {
+  margin-right: 8px;
+  margin-bottom: 0;
+}
+
+.advanced-params-title {
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+  .config-section {
+    padding: 12px;
+  }
+}
+
+/* 修复镜像拉取策略选项样式 */
+.ant-select-item-option-content {
+  white-space: normal !important;
+  word-break: break-word !important;
+}
+
+/* 调整Option内部的内容样式 */
+.ant-select-item-option-content > div {
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
+
+/* 确保描述文字不会被截断 */
+.ant-select-dropdown {
+  max-width: 100%;
+}
+
+/* 增加镜像拉取策略下拉框宽度和文字显示 */
+.policy-select .ant-select-selection-item {
+  white-space: normal !important;
+  line-height: 1.2;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  height: auto !important;
+  word-break: break-word;
+}
+
+/* 调整下拉框内容区域高度 */
+.policy-select .ant-select-selector {
+  height: auto !important;
+  min-height: 32px;
+}
+
+/* 确保描述文字不会被截断 */
+.policy-description {
+  white-space: normal !important;
+  word-break: break-word !important;
+  line-height: 1.2;
+}
+
+/* 确保下拉列表宽度足够 */
+.policy-select + .ant-select-dropdown {
+  min-width: 300px !important;
+}
+
+/* 容器名称输入框和按钮样式 */
+.container-name-section {
+  margin-bottom: 24px;
+}
+
+.container-name-wrapper {
+  display: flex;
+  margin-bottom: 8px;
+}
+
+.container-name-wrapper input {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  width: 100%;
+}
+
+.generate-container-name-btn {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+/* 按钮悬停效果 */
+.generate-container-name-btn:hover {
+  background-color: #1890ff;
+  border-color: #1890ff;
+  color: white;
+  opacity: 0.85;
+}
+
+.container-settings-section {
+  margin-top: 16px;
+}
+
+.image-config-section {
+  margin-bottom: 24px;
+}
+
+.policy-description {
+  opacity: 0.8;
+  padding-left: 16px;
+}
+
+/* 端口配置样式 */
+.port-config {
+  margin-bottom: 20px;
+}
+
+.port-item {
+  background-color: #f5f7fa;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+}
+
+.port-item .ant-row {
+  align-items: center;
+}
+
+.port-label {
+  font-weight: 500;
+}
+
+.add-port-button {
+  margin-top: 8px;
+}
+
+.policy-description {
+  opacity: 0.7;
+  padding-left: 8px;
+}
+
+/* 自定义错误样式 */
+.custom-error input {
+  border-color: #ff4d4f !important;
+}
+
+.custom-error-tip {
+  color: #ff4d4f;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.image-input-wrapper {
+  width: 100%;
+  position: relative;
+}
+
+.image-input-wrapper input:focus {
+  border-color: #40a9ff !important;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2) !important;
+}
+
+.image-input-wrapper.ant-form-item-has-error input,
+#image-input-container.ant-form-item-has-error input {
+  border-color: transparent !important;
+}
+
+#image-input-container .ant-form-item-explain-error {
+  display: none !important;
+}
+
+.form-item-help-text {
+  color: #888;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.image-config-section {
+  margin-bottom: 24px;
+}
+
+/* 确保错误提示不会破坏布局 */
+.ant-form-item-has-error .ant-form-item-explain {
+  position: relative;
+  z-index: 1;
+}
+
+/* 修改Ant Design的错误样式，使其更不显眼 */
+.ant-alert-error {
+  border: 1px solid #ffccc7;
+  background-color: #fff2f0;
+  border-radius: 4px;
+  display: none !important; /* 强制隐藏错误提示 */
+}
+
+/* 自定义提交错误样式 */
+.custom-submit-error {
+  color: #ff4d4f;
+  padding: 8px;
+  margin-bottom: 16px;
+  border: 1px solid #ffccc7;
+  border-radius: 4px;
+  background-color: #fff2f0;
+}
+
+/* 修改错误消息的行为 */
+.ant-message-error {
+  z-index: 1010;
+  pointer-events: all;
+}
+
+.custom-error-message {
+  margin-top: 50px !important;
+}
+
+/* 端口配置项字段标签样式 */
+.port-field-label {
+  font-size: 12px;
+  color: #333;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+/* 镜像输入框样式 */
+.image-input-wrapper {
+  position: relative;
+}
+
+.image-input-wrapper .ant-form-item-explain-error {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 2px;
+}
+
+.image-config-section {
+  margin-bottom: 24px;
+}
+
+.image-config-section .ant-form-item-required::before {
+  display: inline-block;
+  margin-right: 4px;
+  color: #ff4d4f;
+  font-size: 14px;
+  font-family: SimSun, sans-serif;
+  line-height: 1;
+  content: '*';
+}
+
+/* 镜像输入样式 */
+.image-config-section {
+  margin-bottom: 24px;
+}
+
+.image-input-field {
+  width: 100%;
+  border-radius: 4px;
+  transition: all 0.3s;
+}
+
+.image-input-field:focus {
+  border-color: #40a9ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+}
+
+.form-item-help-text {
+  margin-top: 4px;
+  color: #888;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* 确保边框颜色覆盖默认样式 */
+#image-input-container input {
+  border-color: #d9d9d9 !important;
+}
+
+#image-input-container input:focus {
+  border-color: #40a9ff !important;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+}
+
+#image-input-container input.error {
+  border-color: #ff4d4f !important;
+}
+
+/* 隐藏默认错误信息，使用自定义错误样式 */
+.ant-form-item-has-error .ant-form-item-explain-error:contains("请填写镜像地址") {
+  display: none !important;
+}
+
+/* 自定义错误提示样式 */
+.custom-error-tip {
+  color: #ff4d4f;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 4px;
+  display: block;
 } 

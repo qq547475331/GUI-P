@@ -2,7 +2,6 @@ package handler
 
 import (
 	"cloud-deployment-api/model"
-	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -165,6 +165,56 @@ func CreateApplication(c *gin.Context) {
 		return
 	}
 	
+	// 设置默认值
+	// 镜像拉取策略默认值
+	if app.ImagePullPolicy == "" {
+		app.ImagePullPolicy = "IfNotPresent" // 默认为IfNotPresent
+	}
+	
+	// 如果未设置默认的存活探针，但设置了端口，则创建一个HTTP存活探针
+	if app.LivenessProbe == nil && app.Port > 0 {
+		app.LivenessProbe = &model.ProbeConfig{
+			Path:                "/",
+			Port:                app.Port,
+			InitialDelaySeconds: 0,
+			PeriodSeconds:       10,
+			TimeoutSeconds:      1,
+			FailureThreshold:    3,
+			SuccessThreshold:    1,
+			ProbeType:           "http",
+		}
+	}
+	
+	// 注释掉自动添加就绪检测的逻辑，让前端决定是否启用就绪检测
+	// 如果未设置默认的就绪探针，但设置了端口，则创建一个HTTP就绪探针
+	// if app.ReadinessProbe == nil && app.Port > 0 {
+	// 	app.ReadinessProbe = &model.ProbeConfig{
+	// 		Path:                "/ready",
+	// 		Port:                app.Port,
+	// 		InitialDelaySeconds: 10,
+	// 		PeriodSeconds:       5,
+	// 		TimeoutSeconds:      1,
+	// 		FailureThreshold:    3,
+	// 		SuccessThreshold:    1,
+	// 		ProbeType:           "http",
+	// 	}
+	// }
+	
+	// 确保副本数量至少为1
+	if app.Replicas <= 0 {
+		app.Replicas = 1
+	}
+	
+	// 确保端口号有效
+	if app.Port <= 0 {
+		app.Port = 8080
+	}
+	
+	// 设置默认的服务类型
+	if app.ServiceType == "" {
+		app.ServiceType = "ClusterIP"
+	}
+	
 	// 保存到数据库
 	err = model.SaveApplicationToDB(&app)
 	if err != nil {
@@ -209,63 +259,41 @@ func CreateApplication(c *gin.Context) {
 		return
 	}
 	
-	// 准备响应对象
-	responseApp := map[string]interface{}{
-		"id":           app.ID,
-		"appName":      app.Name,
-		"imageName":    app.ImageURL,
-		"instances":    app.Replicas,
-		"cpu":          0.5,
-		"memory":       512,
-		"namespace":    app.Namespace,
-		"kubeConfigId": app.KubeConfigID,
-		"status":       map[string]interface{}{"phase": "pending"},
-		"description":  app.Description,
+	// 记录创建成功的日志
+	log.Printf("应用 '%s' 创建成功 (ID: %s, 命名空间: %s, KubeConfigID: %s)", app.Name, app.ID, app.Namespace, app.KubeConfigID)
+	
+	// 创建完应用记录后立即部署到Kubernetes集群
+	// 更新状态为部署中
+	app.Status = "deploying"
+	
+	// 保存状态变更
+	if err := model.SaveApplicationToDB(&app); err != nil {
+		log.Printf("更新应用状态失败: %v", err)
+		// 继续部署流程，不要因为状态更新失败而中断
 	}
 	
-	// 先返回响应，避免前端超时
-	c.JSON(http.StatusCreated, responseApp)
-	
-	// 异步部署应用到Kubernetes集群
+	// 异步部署应用
 	go func() {
-		log.Printf("开始异步部署应用: %s (ID: %s) 到Kubernetes集群", app.Name, app.ID)
-		
-		// 检查KubeConfig是否可用
-		client, err := model.GetK8sManager().GetClient(app.KubeConfigID)
-		if err != nil {
-			log.Printf("获取Kubernetes客户端失败: %v", err)
-			// 更新应用状态为错误
-			app.Status = "error"
-			model.UpdateApplicationStatusToDB(app.ID, "error")
-			return
-		}
-		
-		// 验证集群连接
-		_, err = client.CoreV1().Namespaces().List(context.TODO(), metav1.ListOptions{Limit: 1})
-		if err != nil {
-			log.Printf("验证Kubernetes集群连接失败: %v", err)
-			// 更新应用状态为错误
-			app.Status = "error"
-			model.UpdateApplicationStatusToDB(app.ID, "error")
-			return
-		}
-		
-		// 部署应用
 		if err := model.GetK8sManager().DeployApplication(&app); err != nil {
 			log.Printf("部署应用失败: %v", err)
-			// 更新应用状态为失败
+			// 部署失败，更新应用状态为错误
 			app.Status = "error"
-			model.UpdateApplicationStatusToDB(app.ID, "error")
-			return
-		}
-		
-		// 部署成功，更新应用状态
-		log.Printf("应用部署成功: %s (ID: %s)", app.Name, app.ID)
-		app.Status = "running"
-		if updateErr := model.UpdateApplicationStatusToDB(app.ID, "running"); updateErr != nil {
-			log.Printf("更新应用状态失败: %v", updateErr)
+			model.UpdateApplicationStatusToDB(app.ID, app.Status)
+		} else {
+			log.Printf("部署应用成功 (ID: %s)", app.ID)
+			// 部署成功，更新应用状态为运行中
+			model.UpdateApplicationStatusToDB(app.ID, "running")
 		}
 	}()
+	
+	// 返回成功响应
+	c.JSON(http.StatusCreated, gin.H{
+		"id": app.ID,
+		"name": app.Name,
+		"namespace": app.Namespace,
+		"status": "deploying",
+		"message": "应用创建成功并开始部署",
+	})
 }
 
 // UpdateApplication 更新应用
@@ -319,14 +347,28 @@ func DeleteApplication(c *gin.Context) {
 		}
 	}
 	
-	log.Printf("删除应用 (ID: %s, 删除K8s资源: %v)", id, deleteK8sResources)
+	// 获取强制删除的参数
+	forceDelete := true // 默认使用强制删除模式以确保资源被清理
+	forceParam := c.Query("force")
+	if forceParam != "" {
+		var err error
+		forceDelete, err = strconv.ParseBool(forceParam)
+		if err != nil {
+			log.Printf("解析force参数失败，使用默认值true: %v", err)
+		}
+	}
+	
+	log.Printf("删除应用 (ID: %s, 删除K8s资源: %v, 强制删除: %v)", id, deleteK8sResources, forceDelete)
 	
 	// 获取应用信息，用于日志记录
 	app, err := model.GetApplicationByIDFromDB(id)
 	if err != nil {
-		log.Printf("应用不存在 (ID: %s): %v", id, err)
-		// 应用不存在，直接返回成功
-		c.JSON(http.StatusOK, gin.H{"message": "应用不存在，无需删除"})
+		if strings.Contains(err.Error(), "no rows in result set") {
+			// 应用不存在，直接返回成功
+			c.JSON(http.StatusOK, gin.H{"message": "应用不存在或已被删除"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("获取应用信息失败: %v", err)})
 		return
 	}
 	
@@ -334,9 +376,22 @@ func DeleteApplication(c *gin.Context) {
 	log.Printf("删除应用 (名称: %s, 命名空间: %s, KubeConfigID: %s)", 
 		app.Name, app.Namespace, app.KubeConfigID)
 	
-	// 删除Kubernetes资源（如果需要）
+	// 先从数据库删除应用记录，确保前端查询时不会再找到该应用
+	// 这样即使k8s资源删除过程较慢，前端也不会显示这个应用
+	log.Printf("从数据库删除应用记录...")
+	if err := model.HardDeleteApplicationFromDB(id); err != nil {
+		if strings.Contains(err.Error(), "no rows in result set") {
+			// 记录已经不存在，继续执行k8s资源删除
+			log.Printf("应用记录已不存在，继续删除Kubernetes资源")
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("删除应用记录失败: %v", err)})
+			return
+		}
+	}
+	
+	// 尝试删除Kubernetes资源（如果需要）
 	if deleteK8sResources && app.KubeConfigID != "" {
-		log.Printf("尝试删除Kubernetes资源...")
+		log.Printf("开始删除Kubernetes资源...")
 		
 		// 获取应用信息
 		appName := app.Name
@@ -349,58 +404,116 @@ func DeleteApplication(c *gin.Context) {
 			namespace = "default"
 		}
 		
-		// 1. 尝试使用DeleteApplicationResources方法删除资源
-		resourcesErr := model.GetK8sManager().DeleteApplicationResources(app.KubeConfigID, namespace, appName)
-		if resourcesErr != nil {
-			log.Printf("使用DeleteApplicationResources删除失败: %v", resourcesErr)
-			
-			// 等待一小段时间后重试
-			time.Sleep(1 * time.Second)
-			
-			// 2. 尝试单独删除部署
-			deploymentErr := model.GetK8sManager().DeleteDeployment(app.KubeConfigID, namespace, appName, "Foreground")
-			if deploymentErr != nil {
-				log.Printf("删除Deployment失败: %v，尝试删除其他资源", deploymentErr)
-				
-				// 无论是否成功，都尝试清理其他资源
-				// 3. 尝试删除Service
-				if svcErr := model.GetK8sManager().DeleteService(app.KubeConfigID, namespace, appName); svcErr != nil {
-					log.Printf("删除Service失败: %v", svcErr)
-				}
-				
-				// 4. 尝试删除ConfigMap
-				if cmErr := model.GetK8sManager().DeleteConfigMap(app.KubeConfigID, namespace, appName+"-config"); cmErr != nil {
-					log.Printf("删除ConfigMap失败: %v", cmErr)
-				}
-				
-				// 5. 尝试删除Secret
-				if secretErr := model.GetK8sManager().DeleteSecret(app.KubeConfigID, namespace, appName+"-secret"); secretErr != nil {
-					log.Printf("删除Secret失败: %v", secretErr)
-				}
-				
-				// 6. 如果前面都失败，尝试强制删除Pods
-				if podsErr := model.GetK8sManager().DeletePodsForApp(app.KubeConfigID, namespace, appName); podsErr != nil {
-					log.Printf("删除Pods失败: %v", podsErr)
+		// 设置级联删除策略
+		propagationPolicy := metav1.DeletePropagationForeground
+		if forceDelete {
+			propagationPolicy = metav1.DeletePropagationBackground
+		}
+		
+		// 创建错误通道，用于收集删除过程中的错误
+		errorChan := make(chan error, 6)
+		
+		// 并行删除所有相关资源以加快删除速度
+		go func() {
+			// 删除Deployment
+			if err := model.GetK8sManager().DeleteDeployment(app.KubeConfigID, namespace, appName, string(propagationPolicy)); err != nil {
+				if !errors.IsNotFound(err) {
+					log.Printf("删除Deployment失败: %v", err)
+					errorChan <- fmt.Errorf("删除Deployment失败: %v", err)
+				} else {
+					errorChan <- nil
 				}
 			} else {
-				log.Printf("成功删除Deployment")
+				errorChan <- nil
 			}
-		} else {
-			log.Printf("成功删除Kubernetes资源")
+		}()
+		
+		go func() {
+			// 删除StatefulSet
+			if err := model.GetK8sManager().DeleteStatefulSet(app.KubeConfigID, namespace, appName, string(propagationPolicy)); err != nil {
+				if !errors.IsNotFound(err) {
+					log.Printf("删除StatefulSet失败: %v", err)
+					errorChan <- fmt.Errorf("删除StatefulSet失败: %v", err)
+				} else {
+					errorChan <- nil
+				}
+			} else {
+				errorChan <- nil
+			}
+		}()
+		
+		go func() {
+			// 删除Service
+			if err := model.GetK8sManager().DeleteService(app.KubeConfigID, namespace, appName); err != nil {
+				if !errors.IsNotFound(err) {
+					log.Printf("删除Service失败: %v", err)
+					errorChan <- fmt.Errorf("删除Service失败: %v", err)
+				} else {
+					errorChan <- nil
+				}
+			} else {
+				errorChan <- nil
+			}
+		}()
+		
+		go func() {
+			// 删除ConfigMap
+			if err := model.GetK8sManager().DeleteConfigMap(app.KubeConfigID, namespace, appName+"-config"); err != nil {
+				if !errors.IsNotFound(err) {
+					log.Printf("删除ConfigMap失败: %v", err)
+					errorChan <- fmt.Errorf("删除ConfigMap失败: %v", err)
+				} else {
+					errorChan <- nil
+				}
+			} else {
+				errorChan <- nil
+			}
+		}()
+		
+		go func() {
+			// 删除Secret
+			if err := model.GetK8sManager().DeleteSecret(app.KubeConfigID, namespace, appName+"-secret"); err != nil {
+				if !errors.IsNotFound(err) {
+					log.Printf("删除Secret失败: %v", err)
+					errorChan <- fmt.Errorf("删除Secret失败: %v", err)
+				} else {
+					errorChan <- nil
+				}
+			} else {
+				errorChan <- nil
+			}
+		}()
+		
+		go func() {
+			// 删除相关的Pod
+			if err := model.GetK8sManager().DeletePodsForApp(app.KubeConfigID, namespace, appName); err != nil {
+				if !errors.IsNotFound(err) {
+					log.Printf("删除Pod失败: %v", err)
+					errorChan <- fmt.Errorf("删除Pod失败: %v", err)
+				} else {
+					errorChan <- nil
+				}
+			} else {
+				errorChan <- nil
+			}
+		}()
+		
+		// 收集错误
+		var errors []error
+		for i := 0; i < 6; i++ {
+			if err := <-errorChan; err != nil {
+				errors = append(errors, err)
+			}
 		}
-	} else {
-		log.Printf("跳过删除Kubernetes资源")
+		
+		// 检查是否有错误发生
+		if len(errors) > 0 {
+			log.Printf("删除Kubernetes资源过程中发生%d个错误", len(errors))
+			// 即使有资源删除错误，也继续执行并返回成功，仅记录日志
+		}
 	}
 	
-	// 从数据库删除应用记录
-	err = model.SoftDeleteApplicationFromDB(id)
-	if err != nil {
-		log.Printf("从数据库删除应用失败: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("删除应用失败: %v", err)})
-		return
-	}
-	
-	log.Printf("成功删除应用 (ID: %s)", id)
+	// 返回成功响应
 	c.JSON(http.StatusOK, gin.H{"message": "应用删除成功"})
 }
 

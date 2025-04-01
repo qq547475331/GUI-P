@@ -38,6 +38,7 @@ import {
 import { useParams, useNavigate } from 'react-router-dom';
 import apiService from '../services/api';
 import './K8sResourcesPage.css';
+import customMessage from '../services/message';
 
 const { Option } = Select;
 const { TabPane } = Tabs;
@@ -428,7 +429,7 @@ const K8sResourcesPage = () => {
       await apiService.deleteKubernetesResource(id, resourceType, namespace, name);
       
       // 删除成功更新消息
-      message.success({ content: `删除${resourceType} ${name}成功`, key: messageKey, duration: 2 });
+      customMessage.appDeleteSuccess(`删除${resourceType} ${name}成功`);
       
       // 删除成功后刷新资源列表
       fetchResources();
@@ -495,11 +496,7 @@ const K8sResourcesPage = () => {
       );
       
       // 伸缩成功
-      message.success({ 
-        content: `伸缩${currentResource.type} ${currentResource.name}成功`, 
-        key: scaleMessageKey, 
-        duration: 2 
-      });
+      customMessage.appDeleteSuccess(`伸缩${currentResource.type} ${currentResource.name}成功`);
       setScaleModalVisible(false);
       fetchResources();
     } catch (error) {
@@ -541,7 +538,7 @@ const K8sResourcesPage = () => {
       await apiService.restartKubernetesDeployment(id, namespace, name);
       
       // 重启成功
-      message.success({ content: `重启Deployment ${name}成功`, key: restartMessageKey, duration: 2 });
+      customMessage.appDeleteSuccess(`重启Deployment ${name}成功`);
       fetchResources();
     } catch (error) {
       // 重启失败

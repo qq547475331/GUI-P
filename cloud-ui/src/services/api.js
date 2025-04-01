@@ -1,4 +1,5 @@
 import axios from 'axios';
+import eventBus, { EVENT_TYPES } from './eventBus';
 
 // 创建axios实例
 const apiClient = axios.create({
@@ -56,6 +57,40 @@ const kubeConfigsCache = {
   isRequesting: false
 };
 
+// 为镜像仓库创建缓存对象
+const registriesCache = {
+  data: null,
+  timestamp: 0,
+  isRequesting: false,
+  pendingPromise: null,
+  _loggedCache: false  // 添加日志追踪标记
+};
+
+// 初始化缓存，从localStorage恢复数据
+(() => {
+  try {
+    // 恢复KubeConfig缓存
+    const cachedKubeConfigs = localStorage.getItem('kubeConfigsCache');
+    const kubeConfigsTimestamp = localStorage.getItem('kubeConfigsCacheTimestamp');
+    if (cachedKubeConfigs && kubeConfigsTimestamp) {
+      kubeConfigsCache.data = JSON.parse(cachedKubeConfigs);
+      kubeConfigsCache.timestamp = parseInt(kubeConfigsTimestamp, 10);
+      console.log('已从localStorage恢复KubeConfig缓存');
+    }
+    
+    // 恢复镜像仓库缓存
+    const cachedRegistries = localStorage.getItem('registriesCache');
+    const registriesTimestamp = localStorage.getItem('registriesCacheTimestamp');
+    if (cachedRegistries && registriesTimestamp) {
+      registriesCache.data = JSON.parse(cachedRegistries);
+      registriesCache.timestamp = parseInt(registriesTimestamp, 10);
+      console.log('已从localStorage恢复镜像仓库缓存');
+    }
+  } catch (e) {
+    console.warn('从localStorage恢复缓存失败:', e);
+  }
+})();
+
 // 为所有Kubernetes资源创建一个通用的缓存键生成函数
 const getCacheKey = (resourceType, id, namespace) => {
   return `${resourceType}_${id}_${namespace || 'all'}`;
@@ -76,7 +111,8 @@ const apiService = {
     if (cachedApps && cachedTimestamp && (now - parseInt(cachedTimestamp)) < 30000) {
       try {
         console.log('使用缓存的应用列表数据');
-        return Promise.resolve(JSON.parse(cachedApps));
+        const parsedData = JSON.parse(cachedApps);
+        return Promise.resolve(apiService.normalizeApplicationsData(parsedData));
       } catch (e) {
         console.error('解析缓存数据失败', e);
         // 解析失败，继续请求新数据
@@ -87,10 +123,11 @@ const apiService = {
     return apiClient.get('/applications', { timeout: 15000 })
       .then(response => {
         console.log('应用列表获取成功');
+        const normalizedData = apiService.normalizeApplicationsData(response);
         // 更新缓存
-        localStorage.setItem('cachedApplications', JSON.stringify(response));
+        localStorage.setItem('cachedApplications', JSON.stringify(normalizedData));
         localStorage.setItem('cachedApplicationsTimestamp', now.toString());
-        return response;
+        return normalizedData;
       })
       .catch(error => {
         console.error('获取应用列表失败:', error);
@@ -100,13 +137,38 @@ const apiService = {
         if (cachedApps) {
           console.log('请求失败，返回缓存的应用列表数据');
           try {
-            return JSON.parse(cachedApps);
+            const parsedData = JSON.parse(cachedApps);
+            return apiService.normalizeApplicationsData(parsedData);
           } catch (e) {
             console.error('解析缓存数据失败', e);
           }
         }
         
         return Promise.reject(error);
+      });
+  },
+  
+  // 确保应用状态的一致性格式
+  normalizeApplicationsData: (applications = []) => {
+    if (!Array.isArray(applications)) return [];
+    
+    return applications.map(app => {
+      // 确保每个应用都有一个一致的状态格式
+      if (!app) return app;
+      
+      // 如果状态已经是对象格式，确保它有phase属性
+      if (typeof app.status === 'object') {
+        if (!app.status.phase) {
+          app.status.phase = app.status.status || 'Unknown';
+        }
+      } else {
+        // 如果状态是字符串，将其转换为对象格式
+        app.status = { 
+          phase: app.status || 'Unknown'
+        };
+      }
+      
+      return app;
       });
   },
   
@@ -161,17 +223,74 @@ const apiService = {
   createApplication: (data) => {
     console.log('创建应用数据:', data);
     
-    // 确保关键字段存在，添加默认值
+    // 检查镜像参数，确保不为空
+    if ((!data.imageUrl && !data.imageName && !data.image) || 
+        (data.imageUrl === '') || (data.imageName === '') || (data.image === '')) {
+      console.error('创建应用失败: 缺少镜像参数');
+      return Promise.reject(new Error('创建应用失败: 请提供有效的镜像地址'));
+    }
+    
+    // 检查应用名称，确保不为空
+    if ((!data.name && !data.appName) || 
+        (data.name === '') || (data.appName === '')) {
+      console.error('创建应用失败: 应用名称为空');
+      return Promise.reject(new Error('创建应用失败: 请提供有效的应用名称'));
+    }
+    
+    // 预处理nodeSelector，将数组转换为map格式
+    let nodeSelectorMap = {};
+    if (data.nodeSelector && Array.isArray(data.nodeSelector)) {
+      data.nodeSelector.forEach(item => {
+        if (item && item.key && item.value) {
+          nodeSelectorMap[item.key] = item.value;
+        }
+      });
+    }
+    
+    // 构建完整的请求数据
     const completeData = {
-      name: data.appName || `app-${Date.now()}`,
-      namespace: data.namespace || 'default',
-      kubeConfigID: data.kubeConfigId || localStorage.getItem('lastSelectedKubeConfigId') || '1',
+      // 基本信息
+      name: data.name || data.appName, // 兼容appName和name两种字段名
+      namespace: data.namespace,
+      kubeConfigID: data.kubeConfigId,
       description: data.description || '',
       status: 'created',
-      imageURL: data.imageName || 'nginx:latest',
-      replicas: data.instances || 1,
-      port: parseInt(data.containerPort, 10) || 80,
-      servicetype: data.serviceType || 'ClusterIP'
+      
+      // 容器配置 - 统一处理镜像参数
+      imageName: data.imageName || data.image || data.imageUrl || 'nginx:latest', // 确保有默认值
+      imageURL: data.imageUrl || data.imageName || data.image || 'nginx:latest', // 确保有默认值
+      image: data.image || data.imageName || data.imageUrl || 'nginx:latest', // 确保有默认值
+      imagePullPolicy: data.imagePullPolicy || 'IfNotPresent',
+      replicas: data.replicas || data.instances || 1, // 兼容instances和replicas两种字段名
+      port: parseInt(data.port || data.containerPort) || 80, // 兼容containerPort和port两种字段名
+      servicetype: data.serviceType || 'ClusterIP',
+      
+      // 添加健康检查
+      livenessProbe: data.livenessProbe,
+      readinessProbe: data.readinessProbe,
+      startupProbe: data.startupProbe,
+      
+      // 添加生命周期管理
+      lifecycle: data.lifecycle,
+      
+      // 添加自定义命令
+      command: data.command,
+      args: data.args,
+      
+      // 添加环境变量
+      envVars: data.envVars || [],
+      
+      // 添加存储卷
+      volumes: data.volumes || [],
+      volumeMounts: data.volumeMounts || [],
+      
+      // 添加安全上下文
+      securityContext: data.securityContext,
+      
+      // 添加调度规则 - 使用转换后的map格式
+      nodeSelector: nodeSelectorMap,
+      tolerations: data.tolerations,
+      affinity: data.affinity
     };
     
     console.log('完整的创建应用数据:', completeData);
@@ -180,6 +299,18 @@ const apiService = {
     return apiClient.post(`/applications?kubeConfigId=${completeData.kubeConfigID}`, completeData)
       .then(response => {
         console.log('创建应用成功:', response);
+        
+        // 触发应用创建事件，通知Dashboard组件刷新列表
+        eventBus.emit(EVENT_TYPES.APP_CREATED, response);
+        
+        // 清除应用列表缓存，确保下次获取到最新数据
+        try {
+          localStorage.removeItem('cachedApplications');
+          localStorage.removeItem('cachedApplicationsTimestamp');
+        } catch (e) {
+          console.warn('清除应用列表缓存失败:', e);
+        }
+        
         return response;
       })
       .catch(error => {
@@ -194,37 +325,256 @@ const apiService = {
   
   // 更新应用配置
   updateApplication: (id, data) => {
-    return apiClient.put(`/applications/${id}`, data);
-  },
-  
-  // 删除应用配置
-  deleteApplication: (id, deleteK8sResources = true) => {
-    console.log('删除应用:', { id, deleteK8sResources });
-    return apiClient.delete(`/applications/${id}?deleteK8sResources=${deleteK8sResources}`)
+    console.log('更新应用数据:', data);
+    
+    // 预处理nodeSelector，将数组转换为map格式
+    let nodeSelectorMap = {};
+    if (data.nodeSelector && Array.isArray(data.nodeSelector)) {
+      data.nodeSelector.forEach(item => {
+        if (item && item.key && item.value) {
+          nodeSelectorMap[item.key] = item.value;
+        }
+      });
+    }
+    
+    // 创建更新数据对象，确保nodeSelector是map格式
+    const updateData = {
+      ...data,
+      nodeSelector: nodeSelectorMap
+    };
+    
+    return apiClient.put(`/applications/${id}`, updateData)
       .then(response => {
-        console.log('删除应用成功:', response);
+        console.log('更新应用成功:', response);
         return response;
       })
       .catch(error => {
-        console.error('删除应用失败:', error);
+        console.error('更新应用失败:', error);
+        // 尝试查看错误详情
+        if (error.response) {
+          console.error('服务器响应:', error.response.data);
+        }
         return Promise.reject(error);
+      });
+  },
+  
+  // 删除应用
+  deleteApplication: async (id, deleteK8sResources = true, force = true) => {
+    if (!id) {
+      console.error('删除应用失败: 未提供应用ID');
+      return Promise.reject(new Error('删除应用失败: 未提供应用ID'));
+    }
+
+    console.log('删除应用:', { id, deleteK8sResources, force });
+    
+    // 创建一个可以取消的请求
+    const CancelToken = axios.CancelToken;
+    const source = CancelToken.source();
+    
+    try {
+      const response = await apiClient.delete(
+        `/applications/${id}?deleteK8sResources=${deleteK8sResources}&force=${force}`,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          timeout: 20000, // 设置20秒超时
+          cancelToken: source.token
+        }
+      );
+
+      console.log('删除应用响应:', response);
+      
+      // 清除相关缓存
+      try {
+        // 使用try/catch包装可能失败的缓存清理操作
+        if (typeof apiService.clearResourceCache === 'function') {
+          apiService.clearResourceCache();
+        }
+        
+        if (typeof apiService.clearNamespacesCache === 'function') {
+          apiService.clearNamespacesCache();
+        }
+      } catch (cacheError) {
+        console.warn('清除缓存时发生错误，但不影响删除操作:', cacheError);
+      }
+      
+      // 处理不同的响应状态
+      if (response.status === 204 || response.status === 200) {
+        return { success: true, message: '应用删除成功' };
+      }
+      
+      return response;
+    } catch (error) {
+      console.error('删除应用失败:', error);
+      
+      // 检查是否是取消请求导致的错误
+      if (axios.isCancel(error)) {
+        console.log('请求已取消:', error.message);
+        return { success: false, message: '请求已取消' };
+      }
+      
+      if (error.response) {
+        // 如果是404，表示应用不存在，视为删除成功
+        if (error.response.status === 404) {
+          return { success: true, message: '应用已删除' };
+        }
+        
+        // 如果是OPTIONS预检请求被拒绝，可能是CORS问题
+        if (error.response.status === 0 || error.response.status === 'OPTIONS') {
+          // 尝试通过刷新页面解决CORS问题
+          console.warn('可能存在CORS问题，建议检查跨域配置');
+        }
+        
+        throw new Error(error.response.data?.error || '删除应用失败');
+      }
+      
+      throw error;
+    }
+  },
+  
+  // 获取应用对应的 Pods
+  getApplicationPods: (id) => {
+    if (!id) {
+      console.error('获取应用Pods失败: 未提供应用ID');
+      return Promise.reject(new Error('获取应用Pods失败: 未提供应用ID'));
+    }
+
+    console.log('获取应用Pods, 应用ID:', id);
+    
+    // 首先获取应用信息，以获取kubeConfigID
+    return apiClient.get(`/applications/${id}`, { timeout: 10000 })
+      .then(appData => {
+        if (!appData || !appData.kubeConfigId) {
+          console.error('获取应用Pods失败: 无法获取应用的kubeConfigId');
+          return [];
+        }
+        
+        const kubeConfigId = appData.kubeConfigId;
+        const namespace = appData.namespace || 'default';
+        const appName = appData.appName || appData.name;
+        
+        console.log('获取特定应用Pods，参数:', { kubeConfigId, namespace, appName });
+        
+        // 尝试从API获取Pod列表
+        return apiClient.get(`/pods?kubeConfigId=${kubeConfigId}&namespace=${namespace}`, 
+          { timeout: 15000 })
+          .then(response => {
+            console.log('获取到的Pods总数:', response?.length || 0);
+            
+            // 确保response是数组
+            const podsList = Array.isArray(response) ? response : [];
+            
+            // 在前端手动过滤出属于当前应用的Pod
+            const filteredPods = podsList.filter(pod => {
+              // 检查pod是否有labels
+              if (!pod.labels) return false;
+              
+              // 检查多种可能的标签组合
+              return (
+                // 检查常见的标签组合
+                (pod.labels.app === appName) || 
+                (pod.labels.application === appName) ||
+                (pod.labels.component === appName) ||
+                (pod.labels.name === appName) ||
+                (pod.labels['app.kubernetes.io/name'] === appName) ||
+                (pod.labels['k8s-app'] === appName) ||
+                // 如果Pod名称包含应用名称（模糊匹配，不太精确但能捕获一些情况）
+                (pod.name && pod.name.includes(appName))
+              );
+            });
+            
+            // 为每个Pod添加clusterId属性，确保导航到详情页时能正确传递kubeConfigId
+            const podsWithClusterId = filteredPods.map(pod => ({
+              ...pod,
+              clusterId: kubeConfigId, // 添加clusterId以便在UI中使用
+              kubeConfigId: kubeConfigId // 保留原始的kubeConfigId字段
+            }));
+            
+            console.log(`过滤后的Pod数量: ${podsWithClusterId.length}/${podsList.length}，应用名称: ${appName}`);
+            return podsWithClusterId;
+          })
+          .catch(error => {
+            console.error('获取应用Pods失败:', error);
+            // 失败时返回空数组，避免界面崩溃
+            return [];
+          });
+      })
+      .catch(error => {
+        console.error('获取应用信息失败:', error);
+        return [];
       });
   },
   
   // 部署应用
   deployApplication: (id) => {
-    return apiClient.post(`/applications/${id}/deploy`);
+    return apiClient.post(`/applications/${id}/deploy`)
+      .then(response => {
+        console.log('部署应用成功:', response);
+        return response;
+      })
+      .catch(error => {
+        console.error('部署应用失败:', error);
+        return Promise.reject(error);
+      });
   },
   
   // 获取应用部署状态
   getDeploymentStatus: (id) => {
     // 对状态查询使用较短的超时时间，因为它是频繁轮询的
     return apiClient.get(`/applications/${id}/status`, { timeout: 10000 })
+      .then(response => {
+        console.log('获取应用状态成功:', response);
+        
+        // 标准化状态格式
+        let standardizedStatus;
+        
+        if (typeof response === 'object') {
+          // 如果已经是对象格式，确保有status属性
+          if (response.status) {
+            standardizedStatus = {
+              ...response,
+              phase: response.status
+            };
+          } else if (response.phase) {
+            standardizedStatus = response;
+          } else {
+            // 对象但没有status或phase属性，使用默认值
+            standardizedStatus = {
+              ...response,
+              status: "unknown",
+              phase: "unknown"
+            };
+          }
+        } else if (typeof response === 'string') {
+          // 如果是字符串，转换为对象格式
+          standardizedStatus = {
+            status: response,
+            phase: response,
+            message: "应用状态",
+            replicas: 0,
+            availableReplicas: 0
+          };
+        } else {
+          // 无效格式，返回默认值
+          standardizedStatus = {
+            status: "unknown",
+            phase: "unknown",
+            message: "无法获取应用状态",
+            replicas: 0,
+            availableReplicas: 0
+          };
+        }
+        
+        return standardizedStatus;
+      })
       .catch(error => {
         console.warn('获取部署状态失败，将在下次重试:', error.message);
         // 返回一个默认值，避免UI显示错误
         return {
           status: "unknown",
+          phase: "unknown",
           message: "获取状态暂时失败，请稍后刷新",
           replicas: 0,
           availableReplicas: 0
@@ -239,7 +589,80 @@ const apiService = {
   
   // 获取所有镜像仓库
   getImageRegistries: () => {
-    return apiClient.get('/registry');
+    const CACHE_TTL = 1800000; // 30分钟缓存
+    
+    // 如果已经有数据且在有效期内，直接使用缓存
+    if (registriesCache.data && (Date.now() - registriesCache.timestamp < CACHE_TTL)) {
+      // 移除频繁打印的缓存命中日志
+      // 仅在开发环境下打印缓存命中日志
+      if (process.env.NODE_ENV === 'development' && !registriesCache._loggedCache) {
+        console.log('使用缓存的镜像仓库列表，有效期内无需重新请求');
+        // 标记已经打印过日志，避免重复输出
+        registriesCache._loggedCache = true;
+        // 5分钟后重置标记，允许再次打印
+        setTimeout(() => {
+          registriesCache._loggedCache = false;
+        }, 300000);
+      }
+      return Promise.resolve(registriesCache.data);
+    }
+    
+    // 如果正在请求中，返回待处理的Promise
+    if (registriesCache.isRequesting || registriesCache.pendingPromise) {
+      console.log('已有镜像仓库请求进行中，等待结果');
+      return registriesCache.pendingPromise || Promise.resolve(registriesCache.data || []);
+    }
+    
+    console.log('缓存过期或不存在，重新获取镜像仓库列表');
+    registriesCache.isRequesting = true;
+    
+    // 创建并缓存Promise
+    registriesCache.pendingPromise = apiClient.get('/registry', { timeout: 10000 })
+      .then(response => {
+        console.log('镜像仓库列表获取成功:', response);
+        
+        // 更新缓存
+        registriesCache.data = response;
+        registriesCache.timestamp = Date.now();
+        // 重置日志标记
+        registriesCache._loggedCache = false;
+        
+        // 同时保存到localStorage作为备份缓存
+        try {
+          localStorage.setItem('registriesCache', JSON.stringify(response));
+          localStorage.setItem('registriesCacheTimestamp', Date.now().toString());
+        } catch (e) {
+          console.warn('无法保存镜像仓库缓存到localStorage:', e);
+        }
+        
+        return response;
+      })
+      .catch(error => {
+        console.error('获取镜像仓库列表失败:', error);
+        
+        // 尝试从localStorage恢复缓存数据
+        try {
+          const cachedData = localStorage.getItem('registriesCache');
+          if (cachedData) {
+            console.log('从localStorage恢复镜像仓库缓存');
+            return JSON.parse(cachedData);
+          }
+        } catch (e) {
+          console.error('从localStorage恢复缓存失败:', e);
+        }
+        
+        // 无缓存可用时返回空数组
+        return registriesCache.data || [];
+      })
+      .finally(() => {
+        // 请求完成，重置状态
+        setTimeout(() => {
+          registriesCache.isRequesting = false;
+          registriesCache.pendingPromise = null;
+        }, 100);
+      });
+    
+    return registriesCache.pendingPromise;
   },
   
   // 获取单个镜像仓库
@@ -279,6 +702,10 @@ const apiService = {
       
       const response = await apiClient.post('/registry', formattedData);
       console.log('创建镜像仓库响应:', response.data);
+      
+      // 清除缓存，确保下次获取到最新数据
+      apiService.clearRegistriesCache();
+      
       return response.data;
     } catch (error) {
       console.error('创建镜像仓库失败:', error);
@@ -288,12 +715,22 @@ const apiService = {
   
   // 更新镜像仓库
   updateImageRegistry: (id, data) => {
-    return apiClient.put(`/registry/${id}`, data);
+    return apiClient.put(`/registry/${id}`, data)
+      .then(response => {
+        // 清除缓存，确保下次获取到最新数据
+        apiService.clearRegistriesCache();
+        return response;
+      });
   },
   
   // 删除镜像仓库
   deleteImageRegistry: (id) => {
-    return apiClient.delete(`/registry/${id}`);
+    return apiClient.delete(`/registry/${id}`)
+      .then(response => {
+        // 清除缓存，确保下次获取到最新数据
+        apiService.clearRegistriesCache();
+        return response;
+      });
   },
   
   // 测试镜像仓库连接
@@ -353,11 +790,6 @@ const apiService = {
   // 获取资源配额
   getResourceQuota: () => {
     return apiClient.get('/resourceQuota');
-  },
-  
-  // 获取预估价格
-  getEstimatedPrice: (resources) => {
-    return apiClient.post('/price', resources);
   },
   
   // Kubernetes相关API
@@ -809,6 +1241,152 @@ const apiService = {
     });
   },
   
+  // 验证KubeConfig是否有效
+  verifyKubeConfig: (kubeConfigId) => {
+    if (!kubeConfigId) {
+      console.error('验证Kubernetes配置失败: 未提供kubeConfigId');
+      return Promise.resolve(false);
+    }
+
+    console.log(`验证KubeConfig配置, ID: ${kubeConfigId}`);
+    
+    // 调用健康检查接口验证kubeconfig是否有效
+    return apiClient.get(`/kubeconfig/${kubeConfigId}/health`, { 
+      timeout: 10000 // 设置短超时，避免长时间等待
+    })
+      .then(response => {
+        console.log('KubeConfig验证成功:', response);
+        return true;
+      })
+      .catch(error => {
+        console.error('KubeConfig验证失败:', error);
+        // 返回false而不是抛出异常，便于调用者处理
+        return false;
+      });
+  },
+  
+  // 获取指定命名空间的Pod列表
+  getPods: (kubeConfigId, namespace, labelSelector) => {
+    if (!kubeConfigId) {
+      console.error('获取Pod列表失败: 未提供kubeConfigId');
+      return Promise.reject(new Error('未提供集群配置ID'));
+    }
+    
+    console.log('获取Pod列表，参数:', { kubeConfigId, namespace, labelSelector });
+    
+    // 构建请求URL
+    let url = `/pods?kubeConfigId=${encodeURIComponent(kubeConfigId)}`;
+    if (namespace) {
+      url += `&namespace=${encodeURIComponent(namespace)}`;
+    }
+    if (labelSelector) {
+      url += `&labelSelector=${encodeURIComponent(labelSelector)}`;
+    }
+    
+    return apiClient.get(url, { timeout: 15000 })
+      .then(response => {
+        console.log('Pod列表获取成功:', response?.length || 0);
+        return Array.isArray(response) ? response : [];
+      })
+      .catch(error => {
+        console.error('获取Pod列表失败:', error);
+        
+        // 特殊处理500错误，返回空数组而不是失败
+        if (error.response && (error.response.status === 500 || error.response.status === 404)) {
+          console.error('服务器返回错误，可能是集群连接问题或权限问题:', error.response.status);
+          console.log('返回空Pod列表，而不是抛出错误');
+          return [];
+        }
+        
+      return Promise.reject(error);
+    });
+  },
+  
+  // 获取Pod日志
+  getPodLogs: (kubeConfigId, namespace, podName, containerName, options = {}) => {
+    if (!kubeConfigId || !namespace || !podName) {
+      console.error('获取Pod日志参数不完整:', { kubeConfigId, namespace, podName });
+      return Promise.reject(new Error('获取Pod日志需要完整的参数'));
+    }
+    
+    const { tailLines = 100, follow = false } = options;
+    
+    console.log('获取Pod日志，参数:', { kubeConfigId, namespace, podName, containerName, tailLines, follow });
+    
+    // 构建请求URL
+    let url = `/pods/${encodeURIComponent(podName)}/logs?kubeConfigId=${encodeURIComponent(kubeConfigId)}&namespace=${encodeURIComponent(namespace)}&tailLines=${tailLines}`;
+    if (containerName) {
+      url += `&container=${encodeURIComponent(containerName)}`;
+    }
+    if (follow) {
+      url += '&follow=true';
+    }
+    
+    return apiClient.get(url, { timeout: 30000 }) // 日志查询给更长的超时时间
+      .then(response => {
+        console.log('Pod日志获取成功');
+        // 处理返回数据，确保兼容不同格式
+        if (typeof response === 'string') {
+        return response;
+        } else if (response && response.logs) {
+          return response.logs;
+        } else if (response && typeof response.data === 'string') {
+          return response.data;
+        } else if (response && response.data && response.data.logs) {
+          return response.data.logs;
+        }
+        return '';
+      })
+      .catch(error => {
+        console.error('获取Pod日志失败:', error);
+        return Promise.reject(error);
+      });
+  },
+
+  // 获取Pod日志流的WebSocket URL
+  getPodLogsStreamUrl: (kubeConfigId, namespace, podName, containerName, tailLines = 100) => {
+    if (!kubeConfigId || !namespace || !podName) {
+      console.error('获取Pod日志流URL参数不完整:', { kubeConfigId, namespace, podName });
+      throw new Error('获取Pod日志流URL需要完整的参数');
+    }
+    
+    // 正确构建WebSocket URL
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    // 使用固定的端口8080，因为后端API服务运行在8080端口
+    const host = 'localhost:8080';
+    const apiBase = '/api'; // 使用固定的API基础路径
+    
+    // 构建完整的WebSocket URL，确保不重复协议和主机
+    let wsUrl = `${protocol}//${host}${apiBase}/ws/logs?kubeConfigId=${encodeURIComponent(kubeConfigId)}&namespace=${encodeURIComponent(namespace)}&podName=${encodeURIComponent(podName)}&tailLines=${tailLines}`;
+    if (containerName) {
+      wsUrl += `&container=${encodeURIComponent(containerName)}`;
+    }
+    
+    console.log('Pod日志流WebSocket URL:', wsUrl);
+    return wsUrl;
+  },
+  
+  // 获取Pod终端的WebSocket URL
+  getPodTerminalUrl: (kubeConfigId, namespace, podName, containerName) => {
+    if (!kubeConfigId || !namespace || !podName || !containerName) {
+      console.error('获取Pod终端URL参数不完整:', { kubeConfigId, namespace, podName, containerName });
+      throw new Error('获取Pod终端URL需要完整的参数');
+    }
+    
+    // 正确构建WebSocket URL - 使用后端实际支持的格式
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    // 使用固定的端口8080，因为后端API服务运行在8080端口
+    const host = 'localhost:8080';
+    const apiBase = '/api'; // 使用固定的API基础路径
+    
+    // 构建完整的WebSocket URL，使用正确的pods/exec格式
+    // 注意: 参数名从container改为containerName，添加默认命令
+    const wsUrl = `${protocol}//${host}${apiBase}/pods/exec?kubeConfigId=${encodeURIComponent(kubeConfigId)}&namespace=${encodeURIComponent(namespace)}&podName=${encodeURIComponent(podName)}&containerName=${encodeURIComponent(containerName)}&command=/bin/sh`;
+    
+    console.log('Pod终端WebSocket URL:', wsUrl);
+    return wsUrl;
+  },
+  
   // 伸缩Kubernetes资源
   scaleKubernetesResource: (id, resourceType, namespace, name, replicas) => {
     return apiClient.put(`/kubeconfig/${id}/${resourceType}/scale?namespace=${namespace}&name=${name}`, { replicas });
@@ -832,423 +1410,37 @@ const apiService = {
     }
     
     const encodedProject = encodeURIComponent(project);
-    console.log(`调用Harbor API获取仓库列表: registry=${registryId}, project=${encodedProject}`);
-    console.log(`请求路径: /registry/${registryId}/harborrepo/${encodedProject}`);
+    console.log(`获取Harbor仓库列表, 参数: { registryId: ${registryId}, project: ${project} }`);
     
-    return apiClient.get(`/registry/${registryId}/harborrepo/${encodedProject}`)
-      .then(response => {
-        console.log('Harbor仓库列表获取成功, 响应数据类型:', typeof response, Array.isArray(response) ? '是数组' : '不是数组');
-        console.log('Harbor仓库列表获取成功, 数据:', response);
-        
-        // 确保结果是数组
-        if (response && !Array.isArray(response)) {
-          console.warn('Harbor API返回非数组结果，尝试转换:', response);
-          if (response.data && Array.isArray(response.data)) {
-            return response.data;
-          } else {
-            console.warn('无法将响应转换为数组:', response);
-            return [];
-          }
-        }
-        
-        return response;
-      })
-      .catch(error => {
-        console.error('获取Harbor仓库列表API错误:', error);
-        console.error('错误详情:', error.response?.data || error.message);
-        return Promise.reject(error);
-      });
+    return apiClient.get(`/registry/${registryId}/repositories?project=${encodedProject}`);
   },
   
-  // 获取特定的Kubernetes资源
-  getKubernetesResource: (id, resourceType, namespace, name) => {
-    if (!id || !resourceType || !namespace || !name) {
-      console.error('获取Kubernetes资源参数不完整:', { id, resourceType, namespace, name });
-      return Promise.reject(new Error('获取Kubernetes资源需要完整的参数'));
-    }
-    
-    console.log('获取Kubernetes资源，请求参数:', { id, resourceType, namespace, name });
-    
-    return apiClient.get(`/kubeconfig/${id}/${resourceType}/${name}?namespace=${namespace}`)
-      .then(response => {
-        console.log(`获取Kubernetes ${resourceType} 成功:`, response);
-        return response;
-      })
-      .catch(error => {
-        console.error(`获取Kubernetes ${resourceType} 失败:`, error);
-        return Promise.reject(error);
-      });
+  // 添加一个清除缓存的方法
+  clearRegistriesCache: () => {
+    registriesCache.data = null;
+    registriesCache.timestamp = 0;
+    registriesCache.isRequesting = false;
+    registriesCache.pendingPromise = null;
+    console.log('镜像仓库缓存已清除');
   },
 
-  // 强制删除Kubernetes资源
-  forceDeleteKubernetesResource: (kubeConfigId, resourceType, namespace, name) => {
-    console.log(`强制删除K8s资源: ${resourceType}/${name} in ${namespace}`);
-    return apiClient.delete(`/kubeconfig/${kubeConfigId}/${resourceType}?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}&force=true&gracePeriod=0`, {
-      timeout: 15000
-    }).then(response => {
-      console.log(`成功强制删除K8s资源: ${resourceType}/${name}`);
-      return response;
-    }).catch(error => {
-      console.error(`强制删除K8s资源失败: ${resourceType}/${name}`, error);
-      return Promise.reject(error);
-    });
-  },
-  
-  // Harbor特定的API方法，用于获取Harbor仓库中的标签
-  getHarborTags: (registryId, project, repository) => {
-    if (!registryId || !project || !repository) {
-      console.error('获取Harbor标签列表参数不完整:', { registryId, project, repository });
-      return Promise.reject(new Error('获取Harbor标签参数不完整'));
-    }
-    
-    const encodedProject = encodeURIComponent(project);
-    const encodedRepository = encodeURIComponent(repository);
-    console.log(`调用Harbor API获取标签列表: registry=${registryId}, project=${encodedProject}, repository=${encodedRepository}`);
-    console.log(`请求路径: /registry/${registryId}/harbortags/${encodedProject}/${encodedRepository}`);
-    
-    return apiClient.get(`/registry/${registryId}/harbortags/${encodedProject}/${encodedRepository}`)
-      .then(response => {
-        console.log('Harbor标签列表获取成功, 响应数据类型:', typeof response, Array.isArray(response) ? '是数组' : '不是数组');
-        console.log('Harbor标签列表获取成功, 数据:', response);
-        
-        // 确保结果是数组
-        if (response && !Array.isArray(response)) {
-          console.warn('Harbor API返回非数组结果，尝试转换:', response);
-          if (response.data && Array.isArray(response.data)) {
-            return response.data;
-          } else {
-            console.warn('无法将响应转换为数组:', response);
-            return [];
-          }
-        }
-        
-        return response;
-      })
-      .catch(error => {
-        console.error('获取Harbor标签列表API错误:', error);
-        console.error('错误详情:', error.response?.data || error.message);
-        return Promise.reject(error);
-      });
-  },
-
-  // 验证KubeConfig是否存在且可用
-  verifyKubeConfig: async (kubeConfigId) => {
-    if (!kubeConfigId) {
-      console.error('verifyKubeConfig: 未提供kubeConfigId');
-      return false;
-    }
-    
-    try {
-      console.log('正在验证kubeconfig是否存在:', kubeConfigId);
-      
-      // 先尝试直接获取kubeconfig信息
-      try {
-        console.log(`检查kubeconfig是否存在: ${kubeConfigId}`);
-        const kubeConfig = await apiClient.get(`/kubeconfig/${kubeConfigId}`, {
-          timeout: 10000
-        });
-        
-        // 如果能成功获取kubeconfig信息，检查是否包含必要信息
-        if (kubeConfig && typeof kubeConfig === 'object' && Object.keys(kubeConfig).length > 0) {
-          console.log('kubeconfig存在且有效:', kubeConfig);
-          return true;
-        } else {
-          console.warn('kubeconfig存在但内容为空');
-        }
-      } catch (error) {
-        console.error('获取kubeconfig信息失败:', error);
-        // 如果获取kubeconfig信息失败，再尝试验证接口
-      }
-      
-      // 检查是否有验证接口
-      try {
-        const response = await apiClient.get(`/kubeconfig/${kubeConfigId}/healthz`, {
-          timeout: 5000
-        });
-        
-        console.log('kubeconfig健康检查结果:', response);
-        if (response && response.status === 'ok') {
-          return true;
-        }
-      } catch (error) {
-        console.warn('kubeconfig健康检查失败, 尝试其他方式验证');
-      }
-      
-      // 兜底方案：尝试获取命名空间列表
-      try {
-        console.log(`尝试获取命名空间列表: ${kubeConfigId}`);
-        const namespaces = await apiClient.get(`/kubeconfig/${kubeConfigId}/namespaces`, {
-          timeout: 8000
-        });
-        
-        if (namespaces && (Array.isArray(namespaces) || (Array.isArray(namespaces.data) && namespaces.data.length > 0))) {
-          console.log('成功获取命名空间列表，kubeconfig有效');
-          return true;
-        } else {
-          console.warn('获取命名空间列表成功，但列表为空');
-          return true; // 仍然认为kubeconfig有效，只是没有命名空间
-        }
-      } catch (error) {
-        // 特殊处理500错误
-        if (error.response && error.response.status === 500) {
-          console.warn('命名空间接口返回500错误，后端可能存在问题，默认kubeconfig有效');
-          // 当命名空间接口返回500错误时，我们仍然认为kubeconfig是有效的，因为这可能是后端临时问题
-          return true;
-        }
-        
-        console.error('所有验证方法都失败，kubeconfig无效:', error);
-        return false;
-      }
-    } catch (error) {
-      console.error('验证kubeconfig过程发生未知错误:', error);
-      return false;
-    }
-  },
-
-  // 清除资源缓存的方法
-  clearResourceCache: (resourceType = null, id = null, namespace = null) => {
+  // 添加一个清除资源缓存的方法
+  clearResourceCache: (resourceType = null, id = null) => {
     if (resourceType && id) {
-      // 清除特定资源的缓存
-      const cacheKey = getCacheKey(resourceType, id, namespace);
-      delete resourcesCache.data[cacheKey];
-      delete resourcesCache.timestamp[cacheKey];
-      console.log(`清除${resourceType}缓存, id: ${id}, 命名空间: ${namespace || '所有'}`);
-    } else {
+      // 清除特定类型和ID的资源缓存
+      Object.keys(resourcesCache.data).forEach(key => {
+        if (key.startsWith(`${resourceType}_${id}`)) {
+          delete resourcesCache.data[key];
+          delete resourcesCache.timestamp[key];
+        }
+      });
+          } else {
       // 清除所有资源缓存
       resourcesCache.data = {};
       resourcesCache.timestamp = {};
-      console.log('所有资源缓存已清除');
     }
+    console.log('资源缓存已清除');
   },
-
-  // 添加清除KubeConfig缓存的方法
-  clearKubeConfigsCache: () => {
-    kubeConfigsCache.data = null;
-    kubeConfigsCache.timestamp = 0;
-    console.log('KubeConfig缓存已清除');
-  },
-
-  // 专门用于删除部署的方法
-  deleteDeployment: (kubeConfigId, namespace, name, force = false) => {
-    console.log(`删除部署: ${namespace}/${name}, 强制: ${force}`);
-    const queryParams = `namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`;
-    const forceParams = force ? '&force=true&gracePeriod=0' : '';
-    
-    return apiClient.delete(`/kubeconfig/${kubeConfigId}/deployments?${queryParams}${forceParams}`, {
-      timeout: 20000
-    }).then(response => {
-      console.log(`成功删除部署: ${namespace}/${name}`);
-      return response;
-    }).catch(error => {
-      // 处理404错误 - 资源可能已经不存在
-      if (error.response && error.response.status === 404) {
-        console.log(`部署不存在，视为删除成功: ${namespace}/${name}`);
-        return { message: `部署 ${name} 不存在或已被删除` };
-      }
-      console.error(`删除部署失败: ${namespace}/${name}`, error);
-      return Promise.reject(error);
-    });
-  },
-  
-  // 添加删除多种关联资源的方法
-  deleteApplicationResources: async (kubeConfigId, namespace, name) => {
-    console.log(`删除应用相关资源: ${namespace}/${name}`);
-    
-    if (!kubeConfigId || !namespace || !name) {
-      console.error('删除应用资源参数不完整:', { kubeConfigId, namespace, name });
-      return Promise.reject(new Error('删除应用资源需要完整的参数'));
-    }
-    
-    // 定义所有需要删除的资源类型
-    const resourceTypes = [
-      'deployments', 
-      'services', 
-      'configmaps', 
-      'secrets',
-      'statefulsets',
-      'daemonsets',
-      'persistentvolumeclaims',
-      'networkpolicies',
-      'ingresses',
-      'pods'
-    ];
-    
-    const results = [];
-    const errors = [];
-    
-    // 并行删除所有资源
-    await Promise.allSettled(
-      resourceTypes.map(async (type) => {
-        try {
-          console.log(`尝试删除资源: ${type}/${name}`);
-          let resourceName = name;
-          
-          // 特殊处理某些资源的命名规则
-          if (type === 'configmaps') {
-            resourceName = `${name}-config`;
-          } else if (type === 'secrets') {
-            resourceName = `${name}-secret`;
-          }
-          
-          const response = await apiClient.delete(
-            `/kubeconfig/${kubeConfigId}/${type}?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(resourceName)}&propagationPolicy=Foreground`,
-            { timeout: 15000 }
-          );
-          
-          results.push({ type, success: true, message: response?.message || `${type} ${resourceName} 已删除` });
-          console.log(`成功删除资源: ${type}/${resourceName}`);
-        } catch (error) {
-          console.error(`删除资源失败: ${type}/${name}`, error);
-          
-          // 404错误视为资源不存在，不视为真正的错误
-          if (error.response && error.response.status === 404) {
-            results.push({ type, success: true, message: `${type} ${name} 不存在或已被删除` });
-          } else {
-            errors.push({ type, error: error.message || String(error) });
-          }
-        }
-      })
-    );
-    
-    console.log('应用资源删除结果:', { results, errors });
-    
-    // 返回删除结果摘要
-    return {
-      success: errors.length === 0,
-      results,
-      errors,
-      message: errors.length === 0 
-        ? `成功删除 ${namespace}/${name} 的所有相关资源` 
-        : `删除 ${namespace}/${name} 资源部分失败，${errors.length}个错误`
-    };
-  },
-  
-  // 获取应用相关的Pod列表
-  getApplicationPods: async (appId) => {
-    try {
-      console.log('获取应用相关Pod, appId:', appId);
-      const application = await apiService.getApplicationById(appId);
-      if (!application) {
-        throw new Error('未找到应用');
-      }
-
-      const { kubeConfigId, namespace, appName } = application;
-      
-      if (!kubeConfigId || !namespace) {
-        throw new Error('应用缺少必要的Kubernetes配置信息');
-      }
-      
-      // 获取该命名空间下的所有Pod
-      const pods = await apiService.getPods(kubeConfigId, namespace);
-      
-      // 根据应用名筛选Pod（通常Pod名包含应用名）
-      // 或者根据应用部署时设置的标签筛选
-      const filteredPods = pods.filter(pod => 
-        pod.name.includes(appName) || 
-        (pod.labels && pod.labels.app === appName)
-      );
-      
-      // 为每个Pod添加clusterId以便导航
-      return filteredPods.map(pod => ({
-        ...pod,
-        clusterId: kubeConfigId
-      }));
-    } catch (error) {
-      console.error('获取应用相关Pod失败:', error);
-      return [];
-    }
-  },
-
-  // 获取Pod日志
-  getPodLogs: (kubeConfigId, namespace, podName, containerName, options = {}) => {
-    const { tailLines = 100, follow = false } = options;
-    console.log('获取Pod日志:', { kubeConfigId, namespace, podName, containerName, tailLines, follow });
-    
-    const params = {
-      kubeConfigId,
-      namespace,
-      containerName,
-      tailLines,
-      follow
-    };
-    
-    return apiClient.get(`/pods/${podName}/logs`, { params })
-      .then(response => {
-        return response;
-      })
-      .catch(error => {
-        console.error('获取Pod日志失败:', error);
-        return Promise.reject(error);
-      });
-  },
-
-  // 获取Pod终端WebSocket URL
-  getPodTerminalUrl: (kubeConfigId, namespace, podName, containerName) => {
-    // 获取后端API地址和WebSocket协议
-    const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || '/api';
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    
-    // 从完整URL中提取主机和路径
-    let wsHost, wsPath;
-    try {
-      if (apiBaseUrl.startsWith('http://') || apiBaseUrl.startsWith('https://')) {
-        // 如果是完整URL，解析出主机和路径部分
-        const url = new URL(apiBaseUrl);
-        wsHost = url.host;  // 如 localhost:8080
-        wsPath = url.pathname;  // 如 /api
-      } else {
-        // 如果只是路径，使用当前窗口的主机
-        wsHost = window.location.host;
-        wsPath = apiBaseUrl.startsWith('/') ? apiBaseUrl : `/${apiBaseUrl}`;
-      }
-      
-      // 构建完整的WebSocket URL
-      return `${wsProtocol}://${wsHost}${wsPath}/pods/exec?kubeConfigId=${kubeConfigId}&namespace=${namespace}&podName=${podName}&containerName=${containerName}&command=/bin/sh`;
-    } catch (error) {
-      console.error('构建WebSocket URL失败:', error);
-      // 回退到使用当前窗口主机
-      return `${wsProtocol}://${window.location.host}/api/pods/exec?kubeConfigId=${kubeConfigId}&namespace=${namespace}&podName=${podName}&containerName=${containerName}&command=/bin/sh`;
-    }
-  },
-  
-  // 获取Pod列表
-  getPods: (kubeConfigId, namespace = 'default') => {
-    const params = {
-      kubeConfigId,
-      namespace
-    };
-    
-    return apiClient.get('/pods', { params });
-  },
-  
-  // 获取Pod Terminal WebSocket URL
-  getPodLogsStreamUrl: (kubeConfigId, namespace, podName, containerName, tailLines = 100) => {
-    // 获取后端API地址和WebSocket协议
-    const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || '/api';
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    
-    // 从完整URL中提取主机和路径
-    let wsHost, wsPath;
-    try {
-      if (apiBaseUrl.startsWith('http://') || apiBaseUrl.startsWith('https://')) {
-        // 如果是完整URL，解析出主机和路径部分
-        const url = new URL(apiBaseUrl);
-        wsHost = url.host;  // 如 localhost:8080
-        wsPath = url.pathname;  // 如 /api
-      } else {
-        // 如果只是路径，使用当前窗口的主机
-        wsHost = window.location.host;
-        wsPath = apiBaseUrl.startsWith('/') ? apiBaseUrl : `/${apiBaseUrl}`;
-      }
-      
-      // 构建WebSocket URL
-      return `${wsProtocol}://${wsHost}${wsPath}/pods/${podName}/logs?kubeConfigId=${kubeConfigId}&namespace=${namespace}&containerName=${containerName}&tailLines=${tailLines}&follow=true`;
-    } catch (error) {
-      console.error('构建WebSocket URL失败:', error);
-      // 回退到使用当前窗口主机
-      return `${wsProtocol}://${window.location.host}/api/pods/${podName}/logs?kubeConfigId=${kubeConfigId}&namespace=${namespace}&containerName=${containerName}&tailLines=${tailLines}&follow=true`;
-    }
-  }
 };
 
 export default apiService;

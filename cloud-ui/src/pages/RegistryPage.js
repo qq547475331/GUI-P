@@ -38,17 +38,28 @@ const RegistryPage = () => {
 
   useEffect(() => {
     fetchRegistries();
+
+    // 设置定时刷新，每5分钟刷新一次
+    const refreshTimer = setInterval(() => {
+      fetchRegistries(true); // 静默刷新
+    }, 300000); // 5分钟 = 300000毫秒
+
+    return () => {
+      clearInterval(refreshTimer); // 组件卸载时清除定时器
+    };
   }, []);
 
-  const fetchRegistries = async () => {
-    setLoading(true);
+  const fetchRegistries = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const data = await apiService.getImageRegistries();
       setRegistries(data);
     } catch (error) {
-      message.error('获取镜像仓库列表失败');
+      if (!silent) {
+        message.error('获取镜像仓库列表失败');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 

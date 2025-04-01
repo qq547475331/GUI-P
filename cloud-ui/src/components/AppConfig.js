@@ -7,6 +7,7 @@ import AdvancedConfig from './AdvancedConfig';
 import ResourceQuota from './ResourceQuota';
 import apiService from '../services/api';
 import './AppConfig.css';
+import customMessage from '../services/message';
 
 const AppConfig = () => {
   const [selectedMenu, setSelectedMenu] = useState('basic');
@@ -96,14 +97,14 @@ const AppConfig = () => {
       
       // 部署应用
       const deployResult = await apiService.deployApplication(applicationId);
-      message.success('应用部署请求已提交');
+      customMessage.success('应用部署请求已提交');
       
       // 定期查询部署状态
       const statusCheckInterval = setInterval(async () => {
         try {
           const status = await apiService.getDeploymentStatus(applicationId);
           if (status.phase === 'Running' || status.phase === 'Succeeded') {
-            message.success('应用部署成功');
+            customMessage.success('应用部署成功');
             clearInterval(statusCheckInterval);
           } else if (status.phase === 'Failed') {
             message.error(`部署失败: ${status.message}`);

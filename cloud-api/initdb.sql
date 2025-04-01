@@ -29,7 +29,25 @@ CREATE TABLE applications (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP WITH TIME ZONE,
     
-    CONSTRAINT unique_app_name_namespace_kubeconfig UNIQUE(name, namespace, kube_config_id)
+    CONSTRAINT unique_app_name_namespace_kubeconfig UNIQUE(name, namespace, kube_config_id),
+    liveness_probe_json TEXT,
+    readiness_probe_json TEXT,
+    startup_probe_json TEXT,
+    lifecycle_json TEXT,
+    command_json TEXT,
+    args_json TEXT,
+    env_vars_json TEXT,
+    security_context_json TEXT,
+    node_selector_json TEXT,
+    tolerations_json TEXT,
+    affinity_json TEXT,
+    volumes_json TEXT,
+    volume_mounts_json TEXT,
+    sync_host_timezone BOOLEAN DEFAULT false,
+    update_strategy VARCHAR(64) DEFAULT 'RollingUpdate',
+    rolling_update_json TEXT,
+    labels_json TEXT,
+    annotations_json TEXT
 );
 
 -- 索引

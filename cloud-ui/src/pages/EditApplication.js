@@ -6,6 +6,7 @@ import ContainerConfig from '../components/ContainerConfig';
 import ResourceSummary from '../components/ResourceSummary';
 import apiService from '../services/api';
 import './EditApplication.css';
+import customMessage from '../services/message';
 
 const { Step } = Steps;
 
@@ -162,7 +163,7 @@ const EditApplication = () => {
       console.log('提交更新数据:', submitData);
       
       await apiService.updateApplication(id, submitData);
-      message.success('应用更新成功');
+      customMessage.success('应用更新成功');
       
       // 部署更新的应用
       try {
@@ -182,7 +183,7 @@ const EditApplication = () => {
         // 如果验证通过，开始部署
         message.loading({ content: '正在重新部署应用...', key: 'redeployApp' });
         await apiService.deployApplication(id);
-        message.success({ content: '应用已成功更新并重新部署!', key: 'redeployApp' });
+        customMessage.deploySuccess('应用已成功更新并重新部署!', 'redeployApp');
       } catch (deployError) {
         console.error('重新部署应用失败:', deployError);
         message.error({ content: '应用更新成功，但重新部署失败! 错误: ' + (deployError.message || '未知错误'), key: 'redeployApp' });

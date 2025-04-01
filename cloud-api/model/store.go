@@ -315,7 +315,7 @@ func InitStore() {
 		Status:      "running",
 		ImageURL:    "docker.io/nginx:latest",
 		Replicas:    1,
-		Port:        80,
+		Port:        8080,
 		ServiceType: "LoadBalancer",
 		CreatedAt:   time.Now().Add(-24 * time.Hour),
 		UpdatedAt:   time.Now().Add(-12 * time.Hour),
@@ -445,7 +445,7 @@ func generateDeploymentYAML(app *Application) string {
 	// 使用容器端口
 	containerPort := app.Port
 	if containerPort <= 0 {
-		containerPort = 8080 // 默认端口
+		containerPort = 8080 // 默认端口改为8080
 	}
 	
 	// 设置默认资源请求
@@ -490,7 +490,7 @@ func generateServiceYAML(app *Application) string {
 	// 使用容器端口
 	containerPort := app.Port
 	if containerPort <= 0 {
-		containerPort = 8080 // 默认端口
+		containerPort = 8080 // 默认端口改为8080
 	}
 	
 	// 确定服务类型

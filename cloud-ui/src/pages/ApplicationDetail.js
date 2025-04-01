@@ -215,17 +215,8 @@ const ApplicationDetail = () => {
         extra={
           <div className="detail-actions">
             <Button 
-              type="primary" 
-              icon={<RocketOutlined />} 
-              onClick={handleDeploy}
-              loading={deployLoading}
-            >
-              部署应用
-            </Button>
-            <Button 
               icon={<CodeOutlined />} 
               onClick={handleExportYaml}
-              style={{ marginLeft: 8 }}
             >
               导出YAML
             </Button>
