@@ -75,7 +75,33 @@
 ### 查看pod日志界面
 ![查看pod日志界面](https://picture-base.oss-cn-hangzhou.aliyuncs.com/image-20250329052651044.png)
 
+![image-20250401113121164](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202504011131317.png)
 
+
+
+
+
+
+
+![image-20250401113201873](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202504011132954.png)
+
+
+
+
+
+
+
+![image-20250401113250584](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202504011132674.png)
+
+![image-20250401113226845](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202504011132965.png)
+
+![image-20250401113337859](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202504011133951.png)
+
+![image-20250401113342395](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202504011133489.png)
+
+![image-20250401113419525](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202504011134606.png)
+
+![image-20250401113423516](https://picture-base.oss-cn-hangzhou.aliyuncs.com/picture/202504011134596.png)
 
 ## 快速开始
 
